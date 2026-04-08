@@ -1,4 +1,4 @@
-from Rappapi.models import User, Dish, Ingredient,Invoice,InvoiceDetail,Rate
+from Rappapi.models import IngredientDish, User, Dish, Ingredient,Invoice,InvoiceDetail,Rate
 from rest_framework import serializers
 
 class UserSerializer(serializers.ModelSerializer):
@@ -50,3 +50,7 @@ class RateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rate
         fields = ['id','user','dish','rating','comment','created_at']
+class IngredientDishSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IngredientDish
+        fields = ['id','ingredient','dish','quantity']
