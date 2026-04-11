@@ -15,7 +15,8 @@ class BaseModel(models.Model):
 class UserRole(models.TextChoices):
     USER = 'USER', 'User'
     ADMIN = 'ADMIN', 'Admin'
-    CHEF = 'CHEF', 'Chef'    
+    CHEF = 'CHEF', 'Chef'
+
 class User(AbstractUser):
     avatar = CloudinaryField('avatar', blank=True, null=True)
 
@@ -31,7 +32,8 @@ class User(AbstractUser):
         'self',
         on_delete=models.SET_NULL,
         null=True,
-        blank=True
+        blank=True,
+        limit_choices_to={'role': UserRole.ADMIN}
     )
 
     def __str__(self):
@@ -47,11 +49,14 @@ class Dish(BaseModel):
     description = models.TextField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
     chef = models.ForeignKey(User, on_delete=models.CASCADE, related_name='dishes')
-    time_served = models.DateTimeField(null=True, blank=True)
+    time_served = models.IntegerField(null=True, blank=True)
     image = CloudinaryField('dish_image', blank=True, null=True)
     ingredient = models.ManyToManyField(Ingredient, through='IngredientDish', related_name='dishes')
     def __str__(self):
         return self.name
+
+    class Meta:
+        verbose_name_plural = 'Dishes'
 
 class Rate(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ratings')
@@ -61,16 +66,16 @@ class Rate(BaseModel):
 
     class Meta:
         unique_together = ('user', 'dish')
+
 class IngredientDish(BaseModel):
     ingredient = models.ForeignKey(Ingredient, on_delete=models.CASCADE,related_name='ingredient_dishes')
     dish = models.ForeignKey(Dish, on_delete=models.CASCADE, related_name='dish_ingredients')
     quantity = models.CharField(max_length=255)
 
-    
-
 class Invoice(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='receipts')
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
+
 class InvoiceDetail(BaseModel):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='details')
     dish = models.ForeignKey(Dish, on_delete=models.CASCADE)
