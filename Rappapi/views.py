@@ -1,7 +1,7 @@
 from rest_framework import viewsets, generics, filters, status, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from Rappapi.models import User, Dish,Ingredient
+from Rappapi.models import Invoice, User, Dish,Ingredient
 from Rappapi import serializers
 
 class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
