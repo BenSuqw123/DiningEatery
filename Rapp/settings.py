@@ -24,7 +24,7 @@ SECRET_KEY = 'django-insecure-2c89=mi4ur&$tw^)_@hs)nzxb4^^ubyr=_73^zz_4w(0z&5%j6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 
@@ -39,7 +39,8 @@ INSTALLED_APPS = [
     'drf_yasg',
     'Rappapi',
     'ckeditor',
-    'ckeditor_uploader'
+    'ckeditor_uploader',
+    'oauth2_provider'
 ]
 
 CKEDITOR_UPLOAD_PATH = "images/ckeditors/"
@@ -106,7 +107,10 @@ AUTH_PASSWORD_VALIDATORS = [
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS':
         'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 2 #20
+    'PAGE_SIZE': 2, #20
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'oauth2_provider.contrib.rest_framework.OAuth2Authentication',
+    )
 }
 
 # Internationalization
@@ -134,3 +138,6 @@ cloudinary.config(
     api_key="124197697555968",
     api_secret="45n1Ut4C5xt4bdquewTAzc9dcB8"
 )
+
+CLIENT_ID = '2IY8QhSJejPaYT0LZ86yc4fyEnKsdUrB80hm3c90'
+CLIENT_SECRET = 'OvDtMIuai69ZuKS5AWgbIDZL1D6VAep0pNldkfGlGCYEShNXyrkDgQvSiBS1QUjIcBlVuIrLiRTwAIy12dDeTVTb797sq2Y6BsPz4QRIoqsZUQVPaQRePOcswJJacQkl'

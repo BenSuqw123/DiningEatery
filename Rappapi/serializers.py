@@ -26,7 +26,7 @@ class UserSerializer(serializers.ModelSerializer):
 class ChefSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'first_name','last_name', 'avatar', 'is_accepted']
+        fields = ['id', 'first_name','last_name', 'avatar']
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -54,13 +54,16 @@ class IngredientDishSerializer(IngredientSerializer):
         fields = ['ingredient', 'quantity']
 
 class DishSerializer(ItemSerializer):
-    ingredients = IngredientDishSerializer(many=True, read_only=True)
+    ingredients = IngredientDishSerializer(
+        source='dish_ingredients',  # 👈 cực kỳ quan trọng
+        many=True,
+        read_only=True
+    )
 
-    chef = UserSerializer(read_only=True)
-
+    chefs = ChefSerializer(many=True, read_only=True)
     class Meta:
         model = Dish
-        fields = ['id', 'created_at', 'name', 'description','price','ingredients','chef','time_served','image']
+        fields = ['id', 'created_at', 'name', 'description','price','ingredients','chefs','time_served','image']
 
 class InvoiceSerializer(serializers.ModelSerializer):
     class Meta:

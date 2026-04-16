@@ -5,19 +5,29 @@ from django.urls import path
 from django import forms
 from django.db.models import Count, Sum
 from ckeditor_uploader.widgets import CKEditorUploadingWidget
-from Rappapi.models import User, UserRole, Ingredient, Dish, Rate, IngredientDish, Invoice, InvoiceDetail
+from Rappapi.models import (
+    User, UserRole, Ingredient, Dish, Rate,
+    IngredientDish, Invoice, InvoiceDetail,
+    Chef, Customer, Admin
+)
 from django.contrib.auth.admin import UserAdmin
 
+
+# --- 1. FORMS & INLINES ---
+
 class DishForm(forms.ModelForm):
+    # Sử dụng CKEditor cho phần mô tả món ăn
     description = forms.CharField(widget=CKEditorUploadingWidget)
 
     class Meta:
         model = Dish
         fields = '__all__'
 
+
 class IngredientDishInline(admin.TabularInline):
     model = IngredientDish
     extra = 1
+
 
 class InvoiceDetailInline(admin.TabularInline):
     model = InvoiceDetail
@@ -25,29 +35,14 @@ class InvoiceDetailInline(admin.TabularInline):
     readonly_fields = ['price']
 
 
-class AdminUser(UserAdmin):
-    list_display = ['id', 'username', 'role', 'is_accepted', 'is_active', 'avatar_display']
-    search_fields = ['username', 'first_name', 'last_name']
-    list_filter = ['role', 'is_accepted', 'is_active']
+# --- 2. CUSTOM USER ADMINS (Inheritance handling) ---
+
+class BaseUserAdmin(UserAdmin):
+    """Lớp nền dùng chung cho các loại User"""
+    list_display = ['id', 'username', 'role', 'is_active', 'avatar_display']
+    search_fields = ['username', 'first_name', 'last_name', 'email']
+    list_filter = ['role', 'is_active']
     readonly_fields = ['avatar_display']
-
-    fieldsets = UserAdmin.fieldsets + (
-        (
-            'Custom Restaurant Info',
-            {
-                'fields': ('role', 'is_accepted', 'admin_accepted', 'avatar', 'avatar_display')
-            }
-        ),
-    )
-
-    add_fieldsets = UserAdmin.add_fieldsets + (
-        (
-            'Custom Restaurant Info',
-            {
-                'fields': ('role', 'is_accepted', 'admin_accepted', 'avatar')
-            }
-        ),
-    )
 
     def avatar_display(self, user):
         if user.avatar:
@@ -56,39 +51,70 @@ class AdminUser(UserAdmin):
 
     avatar_display.short_description = 'Avatar'
 
+
+class AdminProfileAdmin(BaseUserAdmin):
+    """Quản lý dành riêng cho Admin"""
+    fieldsets = UserAdmin.fieldsets + (
+        ('Restaurant Info', {'fields': ('role', 'avatar', 'avatar_display')}),
+    )
+
+
+class ChefProfileAdmin(BaseUserAdmin):
+    """Quản lý dành riêng cho Đầu bếp"""
+    list_display = BaseUserAdmin.list_display + ['admin_accepted']
+    list_filter = BaseUserAdmin.list_filter + ['admin_accepted']
+
+    fieldsets = UserAdmin.fieldsets + (
+        ('Chef Verification', {'fields': ('role', 'admin_accepted', 'avatar', 'avatar_display')}),
+    )
+
+
+class CustomerProfileAdmin(BaseUserAdmin):
+    """Quản lý dành riêng cho Khách hàng"""
+    fieldsets = UserAdmin.fieldsets + (
+        ('Customer Info', {'fields': ('role', 'avatar', 'avatar_display')}),
+    )
+
+
+# --- 3. BUSINESS LOGIC ADMINS ---
+
 class DishAdmin(admin.ModelAdmin):
-    list_display = ['id', 'name', 'price', 'chef', 'active', 'image_display']
+    list_display = ['id', 'name', 'price', 'display_chefs', 'active', 'image_display']
     search_fields = ['name', 'description']
-    list_filter = ['chef', 'active', 'created_at']
+    list_filter = ['chefs', 'active', 'created_at']
+    filter_horizontal = ['chefs']  # Giao diện chọn nhiều đầu bếp thuận tiện
     readonly_fields = ['image_display']
     form = DishForm
     inlines = [IngredientDishInline]
 
-    def get_readonly_fields(self, request, obj=None):
-        if obj:
-            return ['image_display']
-        return []
+    def display_chefs(self, obj):
+        # Hiển thị danh sách các đầu bếp nấu món này
+        return ", ".join([chef.username for chef in obj.chefs.all()])
+
+    display_chefs.short_description = 'Đầu bếp phụ trách'
 
     def image_display(self, dish):
         if dish.image:
-            return mark_safe(f'<img src="{dish.image.url}" width="120" style="border-radius: 8px;" />')
+            return mark_safe(f'<img src="{dish.image.url}" width="100" style="border-radius: 8px;" />')
         return "No Image"
-    image_display.short_description = 'Image'
 
-class IngredientAdmin(admin.ModelAdmin):
-    list_display = ['id', 'name', 'active', 'created_at']
-    search_fields = ['name']
+    image_display.short_description = 'Ảnh món ăn'
+
 
 class RateAdmin(admin.ModelAdmin):
-    list_display = ['id', 'user', 'dish', 'rating', 'created_at']
+    list_display = ['id', 'customer', 'dish', 'rating', 'created_at']
     list_filter = ['rating', 'dish']
-    search_fields = ['comment', 'user__username', 'dish__name']
+    search_fields = ['comment', 'customer__username', 'dish__name']  # Sửa từ user thành customer
+
 
 class InvoiceAdmin(admin.ModelAdmin):
-    list_display = ['id', 'user', 'total_price', 'created_at', 'active']
-    list_filter = ['created_at']
-    search_fields = ['user__username']
+    list_display = ['id', 'customer', 'total_price', 'created_at', 'active']
+    list_filter = ['created_at', 'active']
+    search_fields = ['customer__username']  # Sửa từ user thành customer
     inlines = [InvoiceDetailInline]
+
+
+# --- 4. CUSTOM ADMIN SITE & STATS ---
 
 class RestaurantAdminSite(admin.AdminSite):
     site_header = 'Hệ Thống Quản Lý Nhà Hàng'
@@ -99,23 +125,34 @@ class RestaurantAdminSite(admin.AdminSite):
         ] + super().get_urls()
 
     def restaurant_stats(self, request):
-        chef_stats = User.objects.filter(role=UserRole.CHEF).annotate(
+        # Thống kê số món theo Đầu bếp
+        chef_stats = Chef.objects.annotate(
             dish_count=Count('dishes')
-        ).values('id', 'username', 'dish_count')
+        ).values('username', 'dish_count')
 
-        revenue_stats = User.objects.filter(role=UserRole.USER).annotate(
+        # Thống kê doanh thu theo Khách hàng
+        revenue_stats = Customer.objects.annotate(
             total_spent=Sum('receipts__total_price')
-        ).values('id', 'username', 'total_spent').exclude(total_spent=None)
+        ).values('username', 'total_spent').filter(total_spent__gt=0)
+
+        # Tổng doanh thu chung
+        total_revenue = Invoice.objects.aggregate(Sum('total_price'))['total_price__sum'] or 0
 
         return TemplateResponse(request, 'admin/stats.html', {
             'chef_stats': chef_stats,
-            'revenue_stats': revenue_stats
+            'revenue_stats': revenue_stats,
+            'total_revenue': total_revenue
         })
 
+
+# Khởi tạo Admin Site tùy biến
 admin_site = RestaurantAdminSite(name='myadmin')
 
-admin_site.register(User, AdminUser)
+# Đăng ký các Model vào Site mới
+admin_site.register(Admin, AdminProfileAdmin)
+admin_site.register(Chef, ChefProfileAdmin)
+admin_site.register(Customer, CustomerProfileAdmin)
 admin_site.register(Dish, DishAdmin)
-admin_site.register(Ingredient, IngredientAdmin)
+admin_site.register(Ingredient, admin.ModelAdmin)
 admin_site.register(Rate, RateAdmin)
 admin_site.register(Invoice, InvoiceAdmin)
