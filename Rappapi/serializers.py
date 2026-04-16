@@ -23,10 +23,44 @@ class UserSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
-class DishSerializer(serializers.ModelSerializer):
+class ChefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'first_name','last_name', 'avatar', 'is_accepted']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.avatar:
+            data['avatar'] = instance.avatar.url
+        return data
+
+class ItemSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.image:
+            data['image'] = instance.image.url
+        return data
+
+class IngredientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Ingredient
+        fields = ['id', 'name']
+
+class IngredientDishSerializer(IngredientSerializer):
+    ingredient = IngredientSerializer(read_only=True)
+
+    class Meta:
+        model = IngredientDish
+        fields = ['ingredient', 'quantity']
+
+class DishSerializer(ItemSerializer):
+    ingredients = IngredientDishSerializer(many=True, read_only=True)
+
+    chef = UserSerializer(read_only=True)
+
     class Meta:
         model = Dish
-        fields = ['created_at', 'name', 'description','price','ingredients','chef','time_served','image']
+        fields = ['id', 'created_at', 'name', 'description','price','ingredients','chef','time_served','image']
 
 class InvoiceSerializer(serializers.ModelSerializer):
     class Meta:
@@ -42,15 +76,8 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
                 'read_only':True
             }
         }
-class IngredientSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Ingredient
-        fields = ['id','name','quantity']
+
 class RateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rate
         fields = ['id','user','dish','rating','comment','created_at']
-class IngredientDishSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = IngredientDish
-        fields = ['id','ingredient','dish','quantity']
