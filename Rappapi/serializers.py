@@ -1,14 +1,19 @@
 from Rappapi.models import IngredientDish, User, Dish, Ingredient,Invoice,InvoiceDetail,Rate
 from rest_framework import serializers
 
-class UserSerializer(serializers.ModelSerializer):
+class SimpleUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'username','password', 'avatar')
+        fields = ["first_name","last_name", 'avatar']
+
+
+class UserSerializer(SimpleUserSerializer):
+    class Meta:
+        model = SimpleUserSerializer.Meta.model
+        fields = SimpleUserSerializer.Meta.fields + ['id', 'username','password', 'role']
         extra_kwargs = {
-            'password': {
-                'write_only': True
-            }
+            'password': { 'write_only': True},
+            'role': {'read_only': True}
         }
 
     def to_representation(self, instance):
@@ -84,3 +89,11 @@ class RateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rate
         fields = ['id','customer','dish','rating','comment','created_at']
+        extra_kwargs = {
+            'dish': {'write_only': True},
+            'customer': {'write_only': True}
+        }
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['customer'] = UserSerializer(instance.customer).data
+        return data

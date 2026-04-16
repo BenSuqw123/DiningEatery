@@ -1,3 +1,4 @@
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
@@ -76,12 +77,13 @@ class Dish(BaseModel):
         return self.name
 
     class Meta:
+        ordering = ['-id']
         verbose_name_plural = 'Dishes'
 
 class Rate(BaseModel):
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='ratings')
     dish = models.ForeignKey(Dish, on_delete=models.CASCADE, related_name='ratings')
-    rating = models.IntegerField()
+    rating = models.IntegerField(validators=[MinValueValidator(1),MaxValueValidator(5)],default=5)
     comment = models.TextField(blank=True, null=True)
 
     class Meta:
