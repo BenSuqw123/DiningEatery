@@ -55,7 +55,7 @@ class IngredientDishSerializer(IngredientSerializer):
 
 class DishSerializer(ItemSerializer):
     ingredients = IngredientDishSerializer(
-        source='dish_ingredients',  # 👈 cực kỳ quan trọng
+        source='dish_ingredients',
         many=True,
         read_only=True
     )
@@ -68,14 +68,14 @@ class DishSerializer(ItemSerializer):
 class InvoiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invoice
-        fields = ['id','created_at','user','total_price']
+        fields = ['id','created_at','customer','total_price']
 
 class InvoiceDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = InvoiceDetail
         fields= ['id','created_at','invoice','dish','quantity','price']
         extra_kwargs = {
-            'user':{
+            'customer':{
                 'read_only':True
             }
         }
@@ -83,4 +83,4 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 class RateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rate
-        fields = ['id','user','dish','rating','comment','created_at']
+        fields = ['id','customer','dish','rating','comment','created_at']
