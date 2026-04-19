@@ -4,6 +4,7 @@ from rest_framework.decorators import action, permission_classes
 from rest_framework.response import Response
 from Rappapi.models import User, Dish, Ingredient, Chef, Rate
 from Rappapi import serializers, paginators
+from .firebase import update_firebase_table, get_firebase_table
 
 
 class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
@@ -114,3 +115,80 @@ class IngredientViewSet(viewsets.ViewSet, generics.ListAPIView):
             query = query.filter(name__contains=q)
 
         return query
+
+class TableViewSet(viewsets.ViewSet):
+
+    @action(detail=True, methods=['post'], url_path='book', permission_classes=[permissions.IsAuthenticated])
+    def book_table(self, request, pk=None):
+        table_id = pk
+
+        table_data = get_firebase_table(table_id)
+        if table_data:
+            current_status = table_data.get('status')
+
+            if current_status == 'OCCUPIED' or current_status == 'RESERVED':
+                return Response({
+                    "error": "Bàn này đã được người khác đặt trước"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            update_firebase_table(
+                table_id=table_id,
+                status='RESERVED',
+                total_price=0
+            )
+        except Exception as e:
+            return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"message": f"Đặt bàn {table_id} thành công!"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='order', permission_classes=[permissions.IsAuthenticated])
+    def order_dish(self, request, pk=None):
+        table_id = pk
+
+        dish_id = request.data.get('dish_id')
+        quantity = int(request.data.get('quantity', 1))
+
+        if not dish_id:
+            return Response({"error": "Thiếu dish_id của món ăn."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            dish = Dish.objects.get(id=dish_id, active=True)
+            new_cost = float(dish.price) * quantity
+        except Dish.DoesNotExist:
+            return Response({"error": "Món ăn không tồn tại."}, status=status.HTTP_404_NOT_FOUND)
+
+        table_data = get_firebase_table(table_id)
+        current_total_price = 0
+
+        if table_data:
+            current_total_price = float(table_data.get('total_price', 0))
+
+        # 4. CỘNG DỒN TIỀN
+        updated_total_price = current_total_price + new_cost
+        try:
+            update_firebase_table(
+                table_id=table_id,
+                status='OCCUPIED',
+                total_price=updated_total_price
+            )
+        except Exception as e:
+            return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "message": f"Đã gọi món {dish.name} (x{quantity}) thành công!",
+            "added_cost": new_cost,
+            "total_price_now": updated_total_price
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='checkout', permission_classes=[permissions.IsAuthenticated])
+    def checkout(self, request, pk=None):
+        table_id = pk
+
+        update_firebase_table(
+            table_id=table_id,
+            status='AVAILABLE',
+            total_price=0
+        )
+
+        return Response({"message": "Thanh toán thành công, bàn đã được dọn"}, status=status.HTTP_200_OK)
