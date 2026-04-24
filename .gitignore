@@ -3,3 +3,4 @@ venv/
 .env
 __pycache__/
 *.pyc
+diningapp-9b1aa-firebase-adminsdk-fbsvc-ec017bebec.json
