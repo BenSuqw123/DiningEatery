@@ -61,6 +61,11 @@ class Ingredient(BaseModel):
     def __str__(self):
         return self.name
 
+class Category(BaseModel):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
 
 class Dish(BaseModel):
     name = models.CharField(max_length=255)
@@ -72,6 +77,7 @@ class Dish(BaseModel):
     time_served = models.IntegerField(null=True, blank=True)
     image = CloudinaryField('dish_image', blank=True, null=True)
     ingredient = models.ManyToManyField(Ingredient, through='IngredientDish', related_name='dishes')
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='courses', null=True, blank=True)
 
     def __str__(self):
         return self.name

@@ -1,6 +1,10 @@
 import axios from "axios";
 
 export const endpoints = {
+    dishes : "/dishes/",
+    chefs : "/chefs/",
+    ingredients : "/ingredients/",
+    categories : "/categories/"
 }
 
 export default axios.create({

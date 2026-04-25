@@ -8,7 +8,7 @@ from ckeditor_uploader.widgets import CKEditorUploadingWidget
 from Rappapi.models import (
     User, UserRole, Ingredient, Dish, Rate,
     IngredientDish, Invoice, InvoiceDetail,
-    Chef, Customer, Admin
+    Chef, Customer, Admin, Category
 )
 from django.contrib.auth.admin import UserAdmin
 
@@ -82,7 +82,7 @@ class DishAdmin(admin.ModelAdmin):
     list_display = ['id', 'name', 'price', 'display_chefs', 'active', 'image_display']
     search_fields = ['name', 'description']
     list_filter = ['chefs', 'active', 'created_at']
-    filter_horizontal = ['chefs']  # Giao diện chọn nhiều đầu bếp thuận tiện
+    filter_horizontal = ['chefs']
     readonly_fields = ['image_display']
     form = DishForm
     inlines = [IngredientDishInline]
@@ -156,3 +156,4 @@ admin_site.register(Dish, DishAdmin)
 admin_site.register(Ingredient, admin.ModelAdmin)
 admin_site.register(Rate, RateAdmin)
 admin_site.register(Invoice, InvoiceAdmin)
+admin_site.register(Category)

@@ -1,12 +1,17 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
-import Styles from './styles/Styles';
+import { useState } from "react";
+import Header from "./components/Header";
+import Home from "./screens/Home/Home";
+import { NavigationContainer } from "@react-navigation/native";
 
-export default function App() {
+const App = () => {
+  const [cateId, setCateId] = useState();
+
   return (
-    <View style={Styles.subject}>
-      <Text>Open up App.js your app!</Text>
-      <StatusBar/>
-    </View>
+    <NavigationContainer>
+    <Header/>
+    <Home/>
+    </NavigationContainer>
   );
 }
+
+export default App;

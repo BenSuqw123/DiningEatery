@@ -2,7 +2,7 @@ from django.db.models import Q
 from rest_framework import viewsets, generics, filters, status, parsers, permissions
 from rest_framework.decorators import action, permission_classes
 from rest_framework.response import Response
-from Rappapi.models import User, Dish, Ingredient, Chef, Rate
+from Rappapi.models import User, Dish, Ingredient, Chef, Rate, Category
 from Rappapi import serializers, paginators
 from .firebase import update_firebase_table, get_firebase_table
 
@@ -31,6 +31,10 @@ class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
         ingredient_name = self.request.query_params.get('ingre_name')
         if ingredient_name:
             query = query.filter(ingredient__name__icontains=ingredient_name)
+
+        cate_id = self.request.query_params.get('category_id')
+        if cate_id:
+            query = query.filter(category_id=cate_id)
 
         return query
 
@@ -115,6 +119,10 @@ class IngredientViewSet(viewsets.ViewSet, generics.ListAPIView):
             query = query.filter(name__contains=q)
 
         return query
+
+class CategoryViewSet(viewsets.ViewSet, generics.ListAPIView):
+    queryset = Category.objects.all()
+    serializer_class = serializers.CategorySerializer
 
 class TableViewSet(viewsets.ViewSet):
 

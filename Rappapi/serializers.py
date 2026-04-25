@@ -1,4 +1,4 @@
-from Rappapi.models import IngredientDish, User, Dish, Ingredient,Invoice,InvoiceDetail,Rate
+from Rappapi.models import IngredientDish, User, Dish, Ingredient, Invoice, InvoiceDetail, Rate, Category
 from rest_framework import serializers
 
 class SimpleUserSerializer(serializers.ModelSerializer):
@@ -97,3 +97,8 @@ class RateSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         data['customer'] = UserSerializer(instance.customer).data
         return data
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = '__all__'
