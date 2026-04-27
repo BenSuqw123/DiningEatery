@@ -1,19 +1,25 @@
-from Rappapi.models import IngredientDish, User, Dish, Ingredient, Invoice, InvoiceDetail, Rate, Category
 from rest_framework import serializers
+from Rappapi.models import (
+    IngredientDish, User, Dish, Ingredient, Invoice,
+    InvoiceDetail, Rate, Category, Table,
+    Chef, Customer, Admin
+)
+
 
 class SimpleUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["first_name","last_name", 'avatar']
+        fields = ["first_name", "last_name", 'avatar']
 
 
 class UserSerializer(SimpleUserSerializer):
+    role = serializers.CharField(read_only=True)
+
     class Meta:
-        model = SimpleUserSerializer.Meta.model
-        fields = SimpleUserSerializer.Meta.fields + ['id', 'username','password', 'role']
+        model = User
+        fields = SimpleUserSerializer.Meta.fields + ['id', 'username', 'password', 'role']
         extra_kwargs = {
-            'password': { 'write_only': True},
-            'role': {'read_only': True}
+            'password': {'write_only': True}
         }
 
     def to_representation(self, instance):
@@ -26,18 +32,28 @@ class UserSerializer(SimpleUserSerializer):
         user = User(**validated_data)
         user.set_password(validated_data['password'])
         user.save()
+        Customer.objects.create(user=user)
         return user
 
+
 class ChefSerializer(serializers.ModelSerializer):
+    is_accepted = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'first_name','last_name', 'avatar']
+        fields = ['id', 'first_name', 'last_name', 'avatar', 'is_accepted']
+
+    def get_is_accepted(self, obj):
+        if hasattr(obj, 'chef'):
+            return obj.chef.is_accepted
+        return False
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if instance.avatar:
             data['avatar'] = instance.avatar.url
         return data
+
 
 class ItemSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
@@ -59,40 +75,48 @@ class IngredientDishSerializer(IngredientSerializer):
         fields = ['ingredient', 'quantity']
 
 class DishSerializer(ItemSerializer):
-    ingredients = IngredientDishSerializer(
-        source='dish_ingredients',
-        many=True,
-        read_only=True
-    )
-
+    ingredients = IngredientDishSerializer(source='dish_ingredients',many=True,read_only=True)
     chefs = ChefSerializer(many=True, read_only=True)
+
     class Meta:
         model = Dish
-        fields = ['id', 'created_at', 'name', 'description','price','ingredients','chefs','time_served','image']
+        fields = ['id', 'created_at', 'name', 'description', 'price', 'ingredients', 'chefs', 'time_served', 'image']
 
-class InvoiceSerializer(serializers.ModelSerializer):
+class TableSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Invoice
-        fields = ['id','created_at','customer','total_price']
+        model = Table
+        fields = ['id', 'code', 'location', 'capacity', 'status']
 
 class InvoiceDetailSerializer(serializers.ModelSerializer):
+    dish = serializers.StringRelatedField()
+
     class Meta:
         model = InvoiceDetail
-        fields= ['id','created_at','invoice','dish','quantity','price']
-        extra_kwargs = {
-            'customer':{
-                'read_only':True
-            }
-        }
+        fields = ['id', 'dish', 'quantity', 'status']
+
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    details = InvoiceDetailSerializer(many=True, read_only=True)
+    table_code = serializers.CharField(source='table.code', read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = ['id', 'created_at', 'customer', 'table', 'table_code', 'total_amount', 'is_paid', 'details']
+        read_only_fields = ['total_amount', 'is_paid']
+
+
 
 class RateSerializer(serializers.ModelSerializer):
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+
     class Meta:
         model = Rate
-        fields = ['id','customer','dish','rating','comment','created_at']
+        fields = ['id', 'customer', 'dish', 'comment', 'created_at', 'rating']
         extra_kwargs = {
             'dish': {'write_only': True},
             'customer': {'write_only': True}
         }
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data['customer'] = UserSerializer(instance.customer).data
@@ -102,3 +126,20 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = '__all__'
+
+
+class InvoiceDetailSerializer(serializers.ModelSerializer):
+    user = SimpleUserSerializer(source='invoice.customer', read_only=True)
+    dish_name = serializers.ReadOnlyField(source='dish.name')
+
+    class Meta:
+        model = InvoiceDetail
+        fields = ['id', 'user', 'dish', 'dish_name', 'quantity', 'status']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Chỉ hiện thông tin thanh toán khi status của món đó là True
+        if instance.status is True:
+            data["method"] = instance.method
+            data["transaction_id"] = instance.transaction_id
+        return data

@@ -1,0 +1,7 @@
+from .payments_strategy import PaymentStrategy
+from ...models import PaymentMethod, Payment
+
+class StripePaymentStrategy(PaymentStrategy):
+    def pay(self, amount, invoice_id):
+        payment = Payment(invoice_id=invoice_id, amount=amount, method=PaymentMethod.STRIPE)
+        return payment

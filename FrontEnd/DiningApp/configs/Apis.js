@@ -4,7 +4,8 @@ export const endpoints = {
     dishes : "/dishes/",
     chefs : "/chefs/",
     ingredients : "/ingredients/",
-    categories : "/categories/"
+    categories : "/categories/",
+    
 }
 
 export default axios.create({
