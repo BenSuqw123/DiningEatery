@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
-
+from Rappapi.firebase import update_firebase_table
 
 # ==========================================
 # 0. BASE MODEL
@@ -152,9 +152,7 @@ class Rate(BaseModel):
 class TableStatus(models.TextChoices):
     AVAILABLE = 'AVAILABLE', 'Trống'
     OCCUPIED = 'OCCUPIED', 'Đang ngồi'
-    BILLING = 'BILLING', 'Chờ thanh toán'
-    PAID = 'PAID', 'Đã thanh toán'
-
+    BOOKED = 'BOOKED', 'Check-in'
 
 class Table(BaseModel):
     code = models.CharField(max_length=10, unique=True)
@@ -162,6 +160,14 @@ class Table(BaseModel):
     capacity = models.IntegerField(default=4)
     status = models.CharField(max_length=15, choices=TableStatus.choices, default=TableStatus.AVAILABLE)
 
+    def get_state(self):
+        from Rappapi.design_patterns.State.table_state import AvailableTableState, CheckInTableState, OccupiedTableState
+        _state_map = {'AVAILABLE': AvailableTableState(), 'BOOKED': CheckInTableState(), 'OCCUPIED': OccupiedTableState(),}
+        return _state_map[self.status]
+
+    def _notify_firebase(self, new_status, total_price=0):
+        from Rappapi.firebase import update_firebase_table
+        update_firebase_table(table_id=self.code, status=new_status, total_price=total_price)
 
 # ==========================================
 # 5. NGHIỆP VỤ THANH TOÁN & HÓA ĐƠN

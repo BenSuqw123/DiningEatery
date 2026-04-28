@@ -30,7 +30,7 @@ class InvoiceDetailInline(admin.TabularInline):
     model = InvoiceDetail
     extra = 1
     # Thêm các trường thanh toán mới vào inline của hóa đơn
-    fields = ['dish', 'quantity', 'method', 'transaction_id', 'status']
+    fields = ['dish', 'quantity']
 
 # --- CÁC INLINE CHO PROFILE (COMPOSITION) ---
 class CustomerInline(admin.StackedInline):

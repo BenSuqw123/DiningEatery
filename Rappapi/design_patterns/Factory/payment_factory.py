@@ -3,20 +3,20 @@ from Rappapi.design_patterns.Strategy.paypal_strategy import PaypalPaymentStrate
 from Rappapi.design_patterns.Strategy.momo_strategy import MomoPaymentStrategy
 from Rappapi.design_patterns.Strategy.zalopay_strategy import ZaloPaymentStrategy
 from Rappapi.design_patterns.Strategy.stripe_strategy import StripePaymentStrategy
-from Rappapi.models import PaymentMethod
+
 
 class PaymentFactory:
     @staticmethod
     def get_strategy(method):
-        if method == PaymentMethod.CASH:
+        if method == "CASH":
             return CashPaymentStrategy()
-        elif method == PaymentMethod.MOMO:
+        elif method == "MOMO":
             return MomoPaymentStrategy()
-        elif method == PaymentMethod.ZALOPAY:
+        elif method == "ZALOPAY":
             return ZaloPaymentStrategy()
-        elif method == PaymentMethod.STRIPE:
+        elif method == "STRIPE":
             return StripePaymentStrategy()
-        elif method == PaymentMethod.PAYPAL:
+        elif method == "PAYPAL":
             return PaypalPaymentStrategy()
         else:
             raise Exception('Invalid payment method')

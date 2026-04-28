@@ -1,7 +1,13 @@
+from Rappapi.firebase import update_firebase_table
+from Rappapi.models import TableStatus
 from .payments_strategy import PaymentStrategy
-from ...models import PaymentMethod, Payment
+from Rappapi.models import PaymentMethod
 
 class ZaloPaymentStrategy(PaymentStrategy):
-    def pay(self, amount, invoice_id):
-        payment = Payment(invoice_id=invoice_id, amount=amount, method=PaymentMethod.STRIPE)
-        return payment
+    def pay(self, invoice, table,transaction_id):
+        invoice.method = PaymentMethod.ZALOPAY
+        invoice.is_paid = True
+        invoice.transaction_id = transaction_id
+        invoice.save()
+
+        return invoice

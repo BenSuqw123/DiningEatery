@@ -87,25 +87,6 @@ class TableSerializer(serializers.ModelSerializer):
         model = Table
         fields = ['id', 'code', 'location', 'capacity', 'status']
 
-class InvoiceDetailSerializer(serializers.ModelSerializer):
-    dish = serializers.StringRelatedField()
-
-    class Meta:
-        model = InvoiceDetail
-        fields = ['id', 'dish', 'quantity', 'status']
-
-
-class InvoiceSerializer(serializers.ModelSerializer):
-    details = InvoiceDetailSerializer(many=True, read_only=True)
-    table_code = serializers.CharField(source='table.code', read_only=True)
-
-    class Meta:
-        model = Invoice
-        fields = ['id', 'created_at', 'customer', 'table', 'table_code', 'total_amount', 'is_paid', 'details']
-        read_only_fields = ['total_amount', 'is_paid']
-
-
-
 class RateSerializer(serializers.ModelSerializer):
     rating = serializers.IntegerField(min_value=1, max_value=5)
 
@@ -129,17 +110,23 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class InvoiceDetailSerializer(serializers.ModelSerializer):
-    user = SimpleUserSerializer(source='invoice.customer', read_only=True)
     dish_name = serializers.ReadOnlyField(source='dish.name')
 
     class Meta:
         model = InvoiceDetail
-        fields = ['id', 'user', 'dish', 'dish_name', 'quantity', 'status']
+        fields = ['id', 'dish_name', 'quantity']
+
+class InvoiceSerializer(serializers.ModelSerializer):
+    details = InvoiceDetailSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = ['id', 'created_at', 'total_amount', 'is_paid', 'details']
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # Chỉ hiện thông tin thanh toán khi status của món đó là True
-        if instance.status is True:
+        if instance.is_paid:
             data["method"] = instance.method
             data["transaction_id"] = instance.transaction_id
+
         return data

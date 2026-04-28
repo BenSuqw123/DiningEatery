@@ -1,5 +1,4 @@
 from django.db import transaction
-from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, generics, filters, status, parsers, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -10,8 +9,8 @@ from Rappapi.models import (
 )
 from Rappapi import serializers, paginators
 from .firebase import update_firebase_table, get_firebase_table
-from .serializers import InvoiceDetailSerializer
-
+from .serializers import InvoiceDetailSerializer, InvoiceSerializer
+from .design_patterns.Factory.payment_factory import PaymentFactory
 
 class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
     queryset = Dish.objects.filter(active=True).prefetch_related('chefs', 'dish_ingredients__ingredient')
@@ -115,7 +114,6 @@ class UserViewSet(viewsets.ViewSet, generics.CreateAPIView):
 
 
 class ChefViewSet(viewsets.ViewSet, generics.ListAPIView):
-    # Lọc danh sách: Cần có chef_profile, đã duyệt, và user đang active
     queryset = User.objects.filter(chef__isnull=False, chef__is_accepted=True, is_active=True)
     serializer_class = serializers.ChefSerializer
 
@@ -151,30 +149,22 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
     queryset = Table.objects.filter(active=True)
     serializer_class = serializers.TableSerializer
 
-    @action(detail=True, methods=['post'], url_path='check-in', permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'], url_path='checkin', permission_classes=[permissions.IsAuthenticated])
     def check_in(self, request, pk=None):
         if not hasattr(request.user, 'customer'):
             return Response({"error": "Chỉ khách hàng mới được check-in."}, status=status.HTTP_403_FORBIDDEN)
 
-        table = get_object_or_404(Table, pk=pk)
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn"}, status=status.HTTP_404_NOT_FOUND)
 
         if table.status != TableStatus.AVAILABLE:
             return Response({"error": "Bàn này không trống."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            with transaction.atomic():
-                table.status = TableStatus.OCCUPIED
-                table.save()
-
-                Invoice.objects.create(
-                    customer=request.user,
-                    table=table,
-                    total_amount=0,
-                    is_paid=False
-                )
-
-                update_firebase_table(table_id=table.code, status=TableStatus.OCCUPIED, total_price=0)
-
+            table.get_state().customer_checkin(table)
+            Invoice.objects.create(customer=request.user,table=table,total_amount=0,is_paid=False,transaction_id=None)
+            update_firebase_table(table_id=table.code, status=TableStatus.BOOKED, total_price=0)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -182,45 +172,37 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
 
     @action(detail=True, methods=['post'], url_path='order', permission_classes=[permissions.IsAuthenticated])
     def order_dish(self, request, pk=None):
-        table = get_object_or_404(Table, pk=pk)
         dish_id = request.data.get('dish_id')
-        quantity = int(request.data.get('quantity', 1))
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if table.status != TableStatus.OCCUPIED:
+        try:
+            quantity = int(request.data.get('quantity', 1))
+            if quantity < 1:
+                raise ValueError
+        except (ValueError, TypeError):
+            return Response({"error": "Số lượng không hợp lệ"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if table.status not in [TableStatus.BOOKED, TableStatus.OCCUPIED]:
             return Response({"error": "Bàn chưa có khách check-in."}, status=status.HTTP_400_BAD_REQUEST)
 
-        dish = get_object_or_404(Dish, pk=dish_id, active=True)
+        dish = Dish.objects.filter(pk=dish_id).first()
+        if not dish:
+            return Response({"error": "Không tìm thấy món"}, status=status.HTTP_404_NOT_FOUND)
 
         invoice = Invoice.objects.filter(table=table, is_paid=False).first()
         if not invoice:
             return Response({"error": "Không tìm thấy hóa đơn hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            with transaction.atomic():
-                # --- PHẦN THAY ĐỔI QUAN TRỌNG Ở ĐÂY ---
-                # Kiểm tra xem món này đã được gọi trước đó trong cùng hóa đơn chưa (và chưa thanh toán)
-                detail, created = InvoiceDetail.objects.get_or_create(
-                    invoice=invoice,
-                    dish=dish,
-                    status=False,  # Chỉ gộp vào món đang trong trạng thái chờ
-                    defaults={'quantity': 0}  # Nếu tạo mới thì bắt đầu từ 0
-                )
-
-                # Cộng dồn số lượng
-                detail.quantity += quantity
-                detail.save()
-                # --------------------------------------
-
-                # Cập nhật tổng tiền hóa đơn (vẫn cộng dồn dựa trên số lượng vừa thêm)
-                new_cost = dish.price * quantity
-                invoice.total_amount += new_cost
-                invoice.save()
-
-                update_firebase_table(
-                    table_id=table.code,
-                    status=TableStatus.OCCUPIED,
-                    total_price=float(invoice.total_amount)
-                )
+            detail, created = InvoiceDetail.objects.get_or_create(invoice=invoice,dish=dish,defaults={'quantity': 0})
+            detail.quantity += quantity
+            detail.save()
+            new_cost = dish.price * quantity
+            invoice.total_amount += new_cost
+            invoice.save()
+            table.get_state().customer_order(table, float(invoice.total_amount))
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -233,70 +215,45 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
 
     @action(detail=True, methods=['post'], url_path='checkout', permission_classes=[permissions.IsAuthenticated])
     def checkout(self, request, pk=None):
-        table = get_object_or_404(Table, pk=pk)
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Lấy thông tin thanh toán từ request
-        method = request.data.get('method', PaymentMethod.CASH)
-        # Giả sử transaction_id gửi từ app hoặc mã tự sinh
-        transaction_id = request.data.get('transaction_id', f"TXN-{table.code}-{request.user.id}")
+        method = request.data.get('method')
+        if not method:
+            return Response({"error":"Vui lòng chọn phương thức thanh toán"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Tìm hóa đơn chưa thanh toán của bàn này
+        transaction_id = request.data.get('transaction')
         invoice = Invoice.objects.filter(table=table, is_paid=False).first()
         if not invoice:
-            return Response({"error": "Bàn này không có hóa đơn nào cần thanh toán."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Không có hóa đơn"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            with transaction.atomic():
-                # 1. Cập nhật toàn bộ các món ăn trong hóa đơn này thành 'Đã thanh toán'
-                # Chúng ta dùng .update() để xử lý hàng loạt cho nhanh
-                invoice.details.all().update(
-                    status=True,
-                    method=method,
-                    transaction_id=transaction_id
-                )
-
-                # 2. Đánh dấu Hóa đơn tổng là đã thanh toán
-                invoice.is_paid = True
-                invoice.save()
-
-                # 3. Đưa trạng thái bàn về 'Trống'
-                table.status = TableStatus.AVAILABLE
-                table.save()
-
-                # 4. Cập nhật Firebase để App phục vụ/App quản lý nhận được tin ngay lập tức
-                update_firebase_table(
-                    table_id=table.code,
-                    status=TableStatus.AVAILABLE,
-                    total_price=0
-                )
-
+            payment = PaymentFactory.get_strategy(method=method)
+            if method != "CASH":
+                if not transaction_id:
+                    return Response({"error": "Vui lòng cung cấp mã giao dịch"}, status=status.HTTP_400_BAD_REQUEST)
+                if Invoice.objects.filter(transaction_id=str(transaction_id)).exists():
+                    return Response({"error": "Mã giao dịch đã tồn tại"}, status=status.HTTP_400_BAD_REQUEST)
+                invoice  = payment.pay(invoice,table,transaction_id)
+                table.get_state().customer_checkout(table)
+            else:
+                invoice = payment.pay(invoice,table)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        return Response({
-            "message": "Thanh toán thành công, bàn đã được dọn!",
-            "invoice_id": invoice.id,
-            "total_amount": invoice.total_amount,
-            "payment_method": method
-        }, status=status.HTTP_200_OK)
+        return Response(serializers.InvoiceSerializer(invoice).data,status=status.HTTP_200_OK)
 
 
-class InvoiceDetailViewSet(viewsets.ViewSet, generics.ListAPIView):
-    queryset = InvoiceDetail.objects.select_related('invoice__customer', 'dish').all()
-    serializer_class = InvoiceDetailSerializer
+class InvoiceViewSet(viewsets.ViewSet, generics.ListAPIView):
+    serializer_class = InvoiceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = paginators.DishPaginator
 
-    @action(methods=['get'], url_path='my-orders', detail=False)
-    def get_invoice_details(self, request):
-        # Lấy danh sách món ăn của chính người đang đăng nhập
-        queryset = self.get_queryset().filter(invoice__customer=request.user)
+    def get_queryset(self):
+        query = Invoice.objects.filter(customer=self.request.user).prefetch_related('details__dish')
 
-        # Phân trang
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+        q = self.request.query_params.get('q')
+        if q:
+            query = query.filter(id=q)
 
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
+        return query

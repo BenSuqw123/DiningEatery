@@ -8,3 +8,6 @@ class DishPaginator(pagination.PageNumberPagination):
 
 class RatePaginator(pagination.PageNumberPagination):
     page_size = 10
+
+class InvoicePaginator(pagination.PageNumberPagination):
+    page_size = 2
