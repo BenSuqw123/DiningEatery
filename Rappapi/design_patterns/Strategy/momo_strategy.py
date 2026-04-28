@@ -1,8 +1,13 @@
+from Rappapi.firebase import update_firebase_table
+from Rappapi.models import TableStatus
 from .payments_strategy import PaymentStrategy
-from ...models import PaymentMethod, InvoiceDetail
+from Rappapi.models import PaymentMethod
 
 class MomoPaymentStrategy(PaymentStrategy):
-    def pay(self, invoice_detail):
-        payment = InvoiceDetail(invoice_id=invoice_detail.invoice_id, dish=invoice_detail.dish,
-                                quantity=invoice_detail.quantity, method=PaymentMethod.MOMO, status=True)
-        return payment
+    def pay(self, invoice, table,transaction_id):
+        invoice.method = PaymentMethod.MOMO
+        invoice.is_paid = True
+        invoice.transaction_id = transaction_id
+        invoice.save()
+
+        return invoice

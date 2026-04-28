@@ -172,11 +172,6 @@ class Table(BaseModel):
 # ==========================================
 # 5. NGHIỆP VỤ THANH TOÁN & HÓA ĐƠN
 # ==========================================
-class Invoice(BaseModel):
-    customer = models.ForeignKey(User,on_delete=models.CASCADE,related_name='invoices',limit_choices_to={'customer__isnull': False})
-    table = models.ForeignKey(Table, on_delete=models.PROTECT, related_name='invoices', null=True, blank=True)
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    is_paid = models.BooleanField(default=False)
 
 class PaymentMethod(models.TextChoices):
     CASH = 'CASH', 'Cash'
@@ -185,11 +180,16 @@ class PaymentMethod(models.TextChoices):
     PAYPAL = 'PAYPAL', 'PayPal'
     ZALOPAY = 'ZALOPAY', 'ZaloPay'
 
+class Invoice(BaseModel):
+    customer = models.ForeignKey(User,on_delete=models.CASCADE,related_name='invoices',limit_choices_to={'customer__isnull': False})
+    table = models.ForeignKey(Table, on_delete=models.PROTECT, related_name='invoices', null=True, blank=True)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    is_paid = models.BooleanField(default=False)
+    method = models.CharField(max_length=10, choices=PaymentMethod.choices, null=True, blank=True)
+    transaction_id = models.CharField(max_length=255, unique=True, blank=True, null=True)
+
 class InvoiceDetail(BaseModel):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='details')
     dish = models.ForeignKey(Dish, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
-    method = models.CharField(max_length=10, choices=PaymentMethod.choices)
-    transaction_id = models.CharField(max_length=255, blank=True)
-    status = models.BooleanField(default=False)
 
