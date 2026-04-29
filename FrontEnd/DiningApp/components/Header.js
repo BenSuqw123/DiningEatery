@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Apis from "../configs/Apis";
+import Apis, { endpoints } from "../configs/Apis";
 import Styles from "../styles/Styles";
 import { Chip } from "react-native-paper";
 import { Text, TouchableOpacity, View } from "react-native";
@@ -16,7 +16,7 @@ const Header = ({cateId, setCateId}) => {
         loadCategories();
     },[])
 
-    return (<View style={[Styles.row, Styles.wrap]}>
+    return (<View style={{ flexDirection: "row", flexWrap: "wrap", width: "100%", paddingTop: 50 }}>
             <TouchableOpacity onPress={() => setCateId(null)}>
                 <Chip mode={!cateId ? "outlined":"flat"} style={Styles.margin} icon="label" >Tất cả</Chip>
             </TouchableOpacity>

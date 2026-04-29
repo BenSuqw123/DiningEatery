@@ -5,7 +5,9 @@ export default StyleSheet.create({
         flex: 1,
         marginTop: 50
     }, row: {
-        flexDirection: "row"
+        flexDirection: "row",
+        flexWrap: "wrap", 
+        flex: 1, 
     }, wrap: {
         flexWrap: "wrap"
     }, padding: {

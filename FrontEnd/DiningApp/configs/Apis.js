@@ -9,5 +9,5 @@ export const endpoints = {
 }
 
 export default axios.create({
-    baseURL: "http://192.168.2.23:8000/"
+    baseURL: "http://192.168.1.17:8000/"
 })
