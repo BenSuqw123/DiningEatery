@@ -7,6 +7,10 @@ import Home from "./screens/Home/Home";
 import Login from "./screens/User/Login";
 import Register from "./screens/User/Register";
 import Header from "./components/Header";
+import User from "./screens/User/User";
+import Invoices from "./screens/Invoices/Invoices";
+import Tables from "./screens/Tables/Tables";
+import { MyUserProvider } from "./configs/MyContext";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -28,24 +32,36 @@ const StackNavigator = () => {
     );
 }
 
+const AuthStack = () => (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="UserMain" component={User} />
+        <Stack.Screen name="login" component={Login} />
+        <Stack.Screen name="register" component={Register} />
+    </Stack.Navigator>
+);
+
 const TabNavigator = () => {
     return (
         <Tab.Navigator>
             <Tab.Screen name="home" component={StackNavigator}
-                options={{ title: 'Món ăn', headerShown: false, tabBarIcon: () => <Icon source="home" size={30} /> }} />
-            <Tab.Screen name="login" component={Login}
-                options={{ title: 'Đăng nhập', tabBarIcon: () => <Icon source="account" size={30} /> }} />
-            <Tab.Screen name="register" component={Register}
-                options={{ title: 'Đăng ký', tabBarIcon: () => <Icon source="account-plus" size={30} /> }} />
+                options={{ title: 'Món ăn', headerShown: false, tabBarIcon: () => <Icon source="silverware-fork-knife" size={30} /> }} />
+            <Tab.Screen name="tables" component={Tables}
+                options={{ title: 'Bàn', tabBarIcon: () => <Icon source="table-furniture" size={30} /> }} />
+            <Tab.Screen name="invoices" component={Invoices}
+                options={{ title: 'Hóa Đơn', tabBarIcon: () => <Icon source="receipt-text" size={30} /> }} />
+            <Tab.Screen name="user" component={AuthStack}
+                options={{ title: 'Tài Khoản', tabBarIcon: () => <Icon source="account" size={30} /> }} />
         </Tab.Navigator>
     );
 }
 
 const App = () => {
     return (
-        <NavigationContainer>
-            <TabNavigator />
-        </NavigationContainer>
+        <MyUserProvider>
+            <NavigationContainer>
+                <TabNavigator />
+            </NavigationContainer>
+        </MyUserProvider>
     );
 }
 

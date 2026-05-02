@@ -58,7 +58,7 @@ const Home = ({ cateId }) => {
     }
 
     return (
-        <View>
+        <View style={{ flex: 1 }}>
             <Searchbar value={q} onChangeText={setQ}
                 placeholder="Tìm món ăn..." />
             <FlatList onEndReached={loadMore}

@@ -22,5 +22,10 @@ export default StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 50
+    }, title: {
+        fontSize: 30,
+        fontWeight: "bold",
+        color: "blue",
+        alignSelf: "center"
     }
 });
