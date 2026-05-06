@@ -1,175 +1,95 @@
-import React, { useContext, useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  View,
-  TouchableOpacity,
-} from "react-native";
-import Styles from "../../styles/Styles";
-import { useNavigation } from "@react-navigation/native";
+import { View, Text, TouchableOpacity, KeyboardAvoidingView, Platform, Image } from "react-native";
 import { Button, HelperText, TextInput } from "react-native-paper";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useAlert } from "../../configs/AlertContext";
-
-import Apis, {
-  authApis,
-  CLIENT_ID,
-  CLIENT_SECRET,
-  endpoints,
-} from "../../configs/Apis";
+import { useContext, useState } from "react";
+import Apis, { authApis, CLIENT_ID, CLIENT_SECRET, endpoints } from "../../configs/Apis";
+import { useNavigation } from "@react-navigation/native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MyUserContext } from "../../configs/MyContext";
+import { useAlert } from "../../configs/AlertContext";
 import LoginStyle from "./LoginStyle";
+import { ScrollView } from "react-native";
 
-const PRIMARY_COLOR = "#2563eb";
+const Login = () => {
+    const userInfo = [
+        { field: 'username', label: 'Tên đăng nhập', icon: 'account' },
+        { field: 'password', label: 'Mật khẩu', icon: 'eye', secureTextEntry: true }
+    ];
 
-const Login = ({ route }) => {
-  const [user, setUser] = useState({
-    username: "",
-    password: "",
-  });
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState(false);
+    const [user, setUser] = useState({});
+    const [err, setErr] = useState();
+    const [loading, setLoading] = useState(false);
+    const nav = useNavigation();
+    const [, dispatch] = useContext(MyUserContext);
+    const showAlert = useAlert();
 
-  const nav = useNavigation();
-  const [, dispatch] = useContext(MyUserContext);
-  const showAlert = useAlert();
-
-  const info = [
-    {
-      title: "Tên đăng nhập",
-      field: "username",
-      icon: "account",
-    },
-    {
-      title: "Mật khẩu",
-      field: "password",
-      icon: "eye",
-      secureTextEntry: true,
-    },
-  ];
-
-  const validate = () => {
-    if (!user.username || !user.password) {
-      setErr(true);
-      return false;
+    const validate = () => {
+        for (var i of userInfo)
+            if (!(i.field in user) || !user[i.field]) {
+                setErr(`Vui lòng nhập ${i.label}!`);
+                return false;
+            }
+        return true;
     }
-    setErr(false);
-    return true;
-  };
 
-  const login = async () => {
-    if (validate()) {
-      try {
-        setLoading(true);
+    const login = async () => {
+        if (validate() === true) {
+            setErr("");
+            try {
+                setLoading(true);
+                let res = await Apis.post(endpoints['login'],
+                    `grant_type=password&username=${user.username}&password=${user.password}&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`,
+                    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+                );
 
-        const res = await Apis.post(
-          endpoints["login"],
-          `grant_type=password&username=${user.username}&password=${user.password}&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`,
-          {
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          }
-        );
+                await AsyncStorage.setItem('token', res.data.access_token);
+                let u = await authApis(res.data.access_token).get(endpoints['current_user']);
+                dispatch({ type: "login", payload: u.data });
+                showAlert("Thành công", "Đăng nhập thành công!", "success");
 
-        const { access_token, refresh_token } = res.data;
-        await AsyncStorage.setItem("token", access_token);
-
-        if (refresh_token) {
-          await AsyncStorage.setItem("refresh_token", refresh_token);
+            } catch (ex) {
+                console.error(ex);
+                showAlert("Lỗi đăng nhập", "Tên đăng nhập hoặc mật khẩu không đúng!", "error");
+            } finally {
+                setLoading(false);
+            }
         }
-
-        let userRes = await authApis(access_token).get(
-          endpoints["current-user"]
-        );
-        await AsyncStorage.setItem("user", JSON.stringify(userRes.data));
-
-        dispatch({
-          type: "login",
-          payload: userRes.data,
-        });
-
-        const next = route.params?.next;
-        if (next) nav.navigate(next);
-      } catch (ex) {
-        console.error(ex);
-        showAlert(
-          "Lỗi đăng nhập",
-          "Tên đăng nhập hoặc mật khẩu không đúng. Vui lòng thử lại!",
-          "error"
-        );
-      } finally {
-        setLoading(false);
-      }
     }
-  };
 
-  return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={LoginStyle.container}
-    >
-      <View style={LoginStyle.header}>
-        <Text style={[LoginStyle.title, { color: PRIMARY_COLOR }]}>
-          ĐĂNG NHẬP
-        </Text>
-        <Text style={LoginStyle.subtitle}>Vui lòng đăng nhập để tiếp tục</Text>
-      </View>
+    return (
+        <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={LoginStyle.container}
+        >
+            <ScrollView contentContainerStyle={LoginStyle.scrollContent}
+                        showsVerticalScrollIndicator={false}>
 
-      <ScrollView
-        style={LoginStyle.form}
-        contentContainerStyle={LoginStyle.scrollContent}
-      >
-        <View style={LoginStyle.content}>
-          <HelperText type="error" visible={err} style={{ marginBottom: 10 }}>
-            Vui lòng nhập đầy đủ thông tin tài khoản!
-          </HelperText>
+                <View style={LoginStyle.banner}>
+                    <Text style={LoginStyle.title}>DinningEatery</Text>
+                    <Text style={LoginStyle.subtitle}>Đăng nhập để tiếp tục trải nghiệm</Text>
+                </View>
 
-          {info.map((i) => (
-            <View key={i.field} style={LoginStyle.inputContainer}>
-              <TextInput
-                mode="outlined"
-                outlineColor="#e5e7eb"
-                activeOutlineColor="#2563eb"
-                key={i.field}
-                style={{ backgroundColor: "#f9fafb" }}
-                value={user[i.field]}
-                onChangeText={(t) => setUser({ ...user, [i.field]: t })}
-                label={i.title}
-                secureTextEntry={i.secureTextEntry}
-                right={<TextInput.Icon icon={i.icon} color="#6b7280" />}
-              />
-            </View>
-          ))}
+                <View style={LoginStyle.content}>
+                    {err && <HelperText type="error" visible={!!err}>{err}</HelperText>}
 
-          <Button
-            loading={loading}
-            disabled={loading}
-            style={[
-              LoginStyle.loginButton,
-              { backgroundColor: loading ? "#93c5fd" : "#2563eb" },
-            ]}
-            icon="login"
-            mode="contained"
-            onPress={login}
-            contentStyle={{ height: 50 }}
-            labelStyle={LoginStyle.loginButtonText}
-          >
-            Đăng nhập
-          </Button>
+                    {userInfo.map(i =>
+                        <TextInput key={i.field} mode="outlined" outlineColor="#e5e7eb" activeOutlineColor="#0ea5e9" style={LoginStyle.input} value={user[i.field]} onChangeText={t => setUser({ ...user, [i.field]: t })} label={i.label} secureTextEntry={i.secureTextEntry} right={<TextInput.Icon icon={i.icon} color="#94a3b8" />}/>
+                    )}
 
-          <View style={LoginStyle.signupContainer}>
-            <Text style={LoginStyle.signupText}>Chưa có tài khoản? </Text>
-            <TouchableOpacity onPress={() => nav.navigate("register")}>
-              <Text style={[LoginStyle.signupLink, { color: PRIMARY_COLOR }]}>
-                Đăng ký ngay
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
-};
+                    <Button loading={loading} disabled={loading} onPress={login} mode="contained" buttonColor="#0ea5e9" 
+                    contentStyle={{height:52 }} style={LoginStyle.loginButton} labelStyle={LoginStyle.loginButtonText} icon="login" >
+                        Đăng nhập
+                    </Button>
+
+                    <View style={LoginStyle.signupContainer}>
+                        <Text style={LoginStyle.signupText}>Chưa có tài khoản? </Text>
+                        <TouchableOpacity onPress={() => nav.navigate("register")}>
+                            <Text style={LoginStyle.signupLink}>Đăng ký ngay</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
+    );
+}
 
 export default Login;

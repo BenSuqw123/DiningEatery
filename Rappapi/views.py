@@ -2,7 +2,7 @@ from django.db import transaction
 from rest_framework import viewsets, generics, filters, status, parsers, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
-
+import json
 from Rappapi.models import (
     User, Dish, Ingredient, Rate, Category, Table,
     TableStatus, PaymentMethod, Invoice, InvoiceDetail, Chef, Customer, Admin
@@ -11,8 +11,9 @@ from Rappapi import serializers, paginators
 from .firebase import update_firebase_table, get_firebase_table
 from .serializers import InvoiceDetailSerializer, InvoiceSerializer
 from .design_patterns.Factory.payment_factory import PaymentFactory
+from .design_patterns.Builder.dish_builder import DishBuilder
 
-class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
+class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView):
     queryset = Dish.objects.filter(active=True).prefetch_related('chefs', 'dish_ingredients__ingredient')
     serializer_class = serializers.DishSerializer
     pagination_class = paginators.DishPaginator
@@ -52,6 +53,30 @@ class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
 
         return query
 
+    def create(self, request, *args, **kwargs):
+        request.parsers = [parsers.MultiPartParser()]
+        if not hasattr(request.user, 'chef') or not request.user.chef.is_accepted:
+            return Response({"error": "Chỉ đầu bếp đã được duyệt mới được tạo món ăn."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            ingredients = json.loads(request.data.get('ingredients', '[]'))
+
+            chef_ids = json.loads(request.data.get('chef_ids', '[]'))
+            chefs = User.objects.filter(pk__in=chef_ids, chef__is_accepted=True)
+            chef_list = list(chefs)
+            if request.user not in chef_list:
+                chef_list.append(request.user)
+
+            dish = (DishBuilder(name=request.data.get('name'),description=request.data.get('description'),price=request.data.get('price'),image=request.FILES.get('image'), time_served=request.data.get('time_served'), category_id=request.data.get('category_id'),)
+                .set_chefs(chef_list)
+                .set_ingredients(ingredients)
+                .build())
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(serializers.DishSerializer(dish).data, status=status.HTTP_201_CREATED)
+
     @action(methods=['get'], url_path='chef', detail=True)
     def get_chef(self, request, pk=None):
         chef = self.get_object().chefs.filter(is_active=True)
@@ -63,14 +88,13 @@ class DishViewSet(viewsets.ViewSet, generics.ListAPIView):
         return Response(serializers.IngredientSerializer(ingredient, many=True).data, status=status.HTTP_200_OK)
 
     def get_permissions(self):
-        if self.action in ['rating'] and self.request.method == 'POST':
+        if self.action in ['rating','create'] and self.request.method == 'POST':
             return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
     @action(methods=['post', 'get'], url_path='rates', detail=True)
     def rating(self, request, pk):
         if request.method == 'POST':
-            # Bảo vệ API: Chỉ cho phép người có Customer Profile đánh giá
             if not hasattr(request.user, 'customer'):
                 return Response({"error": "Chỉ khách hàng mới được phép đánh giá."}, status=status.HTTP_403_FORBIDDEN)
 

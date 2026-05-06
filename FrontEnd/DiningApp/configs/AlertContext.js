@@ -46,13 +46,6 @@ export const AlertProvider = ({ children }) => {
 
                     <Dialog.Actions style={styles.actions}>
                         <Button
-                            mode="text"
-                            onPress={hideAlert}
-                            labelStyle={styles.cancelBtn}
-                        >
-                            Đóng
-                        </Button>
-                        <Button
                             mode="contained"
                             onPress={() => {
                                 if (config.onConfirm) config.onConfirm();

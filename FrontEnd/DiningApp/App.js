@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useContext, useReducer } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { NavigationContainer } from "@react-navigation/native";
 import { Icon } from "react-native-paper";
@@ -10,14 +10,18 @@ import Header from "./components/Header";
 import User from "./screens/User/User";
 import Invoices from "./screens/Invoices/Invoices";
 import Tables from "./screens/Tables/Tables";
-import { MyUserProvider } from "./configs/MyContext";
+import { MyUserContext } from "./configs/MyContext";
+import { MyUserReducer } from "./configs/MyContext";
+import UserProfile from "./screens/User/UserProfile";
+import ManageDish from "./screens/Chef/ManageDish";
+import { AlertProvider } from "./configs/AlertContext";
+import { PaperProvider } from "react-native-paper";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const StackNavigator = () => {
     const [cateId, setCateId] = useState();
-
     return (
         <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="index">
@@ -41,27 +45,45 @@ const AuthStack = () => (
 );
 
 const TabNavigator = () => {
+    const [user, ] = useContext(MyUserContext);
     return (
         <Tab.Navigator>
             <Tab.Screen name="home" component={StackNavigator}
                 options={{ title: 'Món ăn', headerShown: false, tabBarIcon: () => <Icon source="silverware-fork-knife" size={30} /> }} />
             <Tab.Screen name="tables" component={Tables}
                 options={{ title: 'Bàn', tabBarIcon: () => <Icon source="table-furniture" size={30} /> }} />
-            <Tab.Screen name="invoices" component={Invoices}
-                options={{ title: 'Hóa Đơn', tabBarIcon: () => <Icon source="receipt-text" size={30} /> }} />
-            <Tab.Screen name="user" component={AuthStack}
-                options={{ title: 'Tài Khoản', tabBarIcon: () => <Icon source="account" size={30} /> }} />
+
+            {user?.role === 'CHEF' ? (
+                <Tab.Screen name="manage" component={ManageDish}
+                    options={{ title: 'Quản lý món', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
+            ) : (
+                <Tab.Screen name="invoices" component={Invoices}
+                    options={{ title: 'Hóa Đơn', tabBarIcon: () => <Icon source="receipt-text" size={30} /> }} />
+            )}
+
+            {user === null ? (
+                <Tab.Screen name="user" component={AuthStack}
+                    options={{ title: 'Tài Khoản', tabBarIcon: () => <Icon source="account" size={30} /> }} />
+            ) : (
+                <Tab.Screen name="profile" component={UserProfile}
+                    options={{ title: 'Thông tin', tabBarIcon: () => <Icon source="account" size={30} /> }} />
+            )}
         </Tab.Navigator>
     );
 }
 
 const App = () => {
+    const [user, dispatch] = useReducer(MyUserReducer, null);
     return (
-        <MyUserProvider>
-            <NavigationContainer>
-                <TabNavigator />
-            </NavigationContainer>
-        </MyUserProvider>
+        <MyUserContext.Provider value={[user, dispatch]}>
+            <PaperProvider>
+                <AlertProvider>
+                    <NavigationContainer>
+                        <TabNavigator />
+                    </NavigationContainer>
+                </AlertProvider>
+            </PaperProvider>
+        </MyUserContext.Provider>
     );
 }
 
