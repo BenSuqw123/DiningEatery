@@ -10,12 +10,12 @@ import Header from "./components/Header";
 import User from "./screens/User/User";
 import Invoices from "./screens/Invoices/Invoices";
 import Tables from "./screens/Tables/Tables";
-import { MyUserContext } from "./configs/MyContext";
-import { MyUserReducer } from "./configs/MyContext";
+import { MyUserContext, MyUserReducer } from "./configs/MyContext";
 import UserProfile from "./screens/User/UserProfile";
 import ManageDish from "./screens/Chef/ManageDish";
 import { AlertProvider } from "./configs/AlertContext";
 import { PaperProvider } from "react-native-paper";
+import AdminStats from "./screens/Admin/AdminStats";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -48,17 +48,25 @@ const TabNavigator = () => {
     const [user, ] = useContext(MyUserContext);
     return (
         <Tab.Navigator>
-            <Tab.Screen name="home" component={StackNavigator}
-                options={{ title: 'Món ăn', headerShown: false, tabBarIcon: () => <Icon source="silverware-fork-knife" size={30} /> }} />
-            <Tab.Screen name="tables" component={Tables}
-                options={{ title: 'Bàn', tabBarIcon: () => <Icon source="table-furniture" size={30} /> }} />
+            
 
             {user?.role === 'CHEF' ? (
                 <Tab.Screen name="manage" component={ManageDish}
                     options={{ title: 'Quản lý món', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
+
+            ) : user?.role === 'ADMIN' ? (
+                <Tab.Screen name="stats" component={AdminStats}
+                    options={{ title: 'Thống kê', tabBarIcon: () => <Icon source="chart-bar" size={30} /> }} />
+
             ) : (
-                <Tab.Screen name="invoices" component={Invoices}
-                    options={{ title: 'Hóa Đơn', tabBarIcon: () => <Icon source="receipt-text" size={30} /> }} />
+                <>
+                    <Tab.Screen name="home" component={StackNavigator}
+                        options={{ title: 'Món ăn', headerShown: false, tabBarIcon: () => <Icon source="silverware-fork-knife" size={30} /> }} />
+                    <Tab.Screen name="tables" component={Tables}
+                        options={{ title: 'Bàn', tabBarIcon: () => <Icon source="table-furniture" size={30} /> }} />
+                    <Tab.Screen name="invoices" component={Invoices}
+                        options={{ title: 'Hóa Đơn', tabBarIcon: () => <Icon source="receipt-text" size={30} /> }} />
+                </>
             )}
 
             {user === null ? (
