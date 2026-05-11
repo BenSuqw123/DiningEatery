@@ -1,4 +1,9 @@
-from django.db import transaction
+import secrets
+from datetime import timedelta
+from django.utils import timezone
+
+from oauth2_provider.models import Application, AccessToken, RefreshToken
+from oauth2_provider.settings import oauth2_settings
 from rest_framework import viewsets, generics, filters, status, parsers, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -8,7 +13,7 @@ from Rappapi.models import (
     TableStatus, PaymentMethod, Invoice, InvoiceDetail, Chef, Customer, Admin
 )
 from Rappapi import serializers, paginators
-from .firebase import update_firebase_table, get_firebase_table
+from .firebase import update_firebase_table, get_firebase_table, get_or_create_chat_room, send_chat_message, get_chat_messages, get_chef_rooms
 from .serializers import InvoiceDetailSerializer, InvoiceSerializer
 from .design_patterns.Factory.payment_factory import PaymentFactory
 from .design_patterns.Builder.dish_builder import DishBuilder
@@ -281,3 +286,77 @@ class InvoiceViewSet(viewsets.ViewSet, generics.ListAPIView):
             query = query.filter(id=q)
 
         return query
+
+class ChatViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['post'], url_path='room')
+    def get_or_create_room(self, request):
+        user = request.user
+
+        if hasattr(user, 'customer'):
+            customer_id = user.id
+            chef_id = request.data.get('chef_id')
+            if not chef_id:
+                return Response({"error": "Thiếu chef_id"}, status=status.HTTP_400_BAD_REQUEST)
+            if not User.objects.filter(id=chef_id, chef__is_accepted=True).exists():
+                return Response({"error": "Đầu bếp không tồn tại"}, status=status.HTTP_404_NOT_FOUND)
+
+        elif hasattr(user, 'chef'):
+            chef_id = user.id
+            customer_id = request.data.get('customer_id')
+            if not customer_id:
+                return Response({"error": "Thiếu customer_id"}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({"error": "Không có quyền"}, status=status.HTTP_403_FORBIDDEN)
+
+        room_id = get_or_create_chat_room(customer_id, chef_id)
+        return Response({"room_id": room_id,"firebase_path": f"chats/{room_id}/messages"}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='send')
+    def send_message(self, request):
+        user = request.user
+        room_id = request.data.get('room_id')
+        text = request.data.get('text', '').strip()
+
+        if not room_id or not text:
+            return Response({"error": "Thiếu room_id hoặc text"}, status=status.HTTP_400_BAD_REQUEST)
+
+        parts = room_id.split('_')
+        try:
+            c_id = int(parts[1])
+            ch_id = int(parts[3])
+        except (IndexError, ValueError):
+            return Response({"error": "room_id không hợp lệ"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.id not in [c_id, ch_id]:
+            return Response({"error": "Bạn không thuộc phòng chat này"}, status=status.HTTP_403_FORBIDDEN)
+
+        msg_key = send_chat_message(room_id=room_id, sender_id=user.id, sender_role=user.role, text=text)
+        return Response({"message_id": msg_key, "status": "sent"}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='history')
+    def get_history(self, request):
+        room_id = request.query_params.get('room_id')
+        if not room_id:
+            return Response({"error": "Thiếu room_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        messages = get_chat_messages(room_id)
+        return Response(messages, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='my-rooms')
+    def my_rooms(self, request):
+        user = request.user
+        if not hasattr(user, 'chef'):
+            return Response({"error": "Chỉ dành cho đầu bếp"}, status=status.HTTP_403_FORBIDDEN)
+
+        rooms = get_chef_rooms(user.id)
+        for room in rooms:
+            try:
+                c = User.objects.get(id=room['customer_id'])
+                room['customer_name'] = f"{c.first_name} {c.last_name}"
+                room['customer_avatar'] = c.avatar.url if c.avatar else None
+            except User.DoesNotExist:
+                room['customer_name'] = "Khách hàng"
+                room['customer_avatar'] = None
+        return Response(rooms, status=status.HTTP_200_OK)

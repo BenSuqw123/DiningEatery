@@ -15,6 +15,12 @@ export const endpoints = {
     login:     "/o/token/",
     register:  "/users/",
     current_user: "/users/current-user/",
+
+    //CHAT REALTIME
+    chat_room:    "/chats/room/",
+    chat_send:    "/chats/send/",
+    chat_history: "/chats/history/",
+    chat_my_rooms: "/chats/my-rooms/",
 }
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;

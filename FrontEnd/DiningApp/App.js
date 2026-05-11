@@ -16,6 +16,8 @@ import ManageDish from "./screens/Chef/ManageDish";
 import { AlertProvider } from "./configs/AlertContext";
 import { PaperProvider } from "react-native-paper";
 import AdminStats from "./screens/Admin/AdminStats";
+import ChatListScreen from "./screens/Chat/ChatListScreen";
+import ChatScreen from "./screens/Chat/ChatScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -36,6 +38,13 @@ const StackNavigator = () => {
     );
 }
 
+const ChatStack = () => (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="ChatList" component={ChatListScreen} />
+        <Stack.Screen name="Chat" component={ChatScreen} />
+    </Stack.Navigator>
+);
+
 const AuthStack = () => (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="UserMain" component={User} />
@@ -51,9 +60,12 @@ const TabNavigator = () => {
             
 
             {user?.role === 'CHEF' ? (
+                <>
                 <Tab.Screen name="manage" component={ManageDish}
                     options={{ title: 'Quản lý món', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
-
+                <Tab.Screen name="chat" component={ChatStack}
+                    options={{ title: 'Chat', tabBarIcon: () => <Icon source="chat" size={30} /> }} />
+                </>
             ) : user?.role === 'ADMIN' ? (
                 <Tab.Screen name="stats" component={AdminStats}
                     options={{ title: 'Thống kê', tabBarIcon: () => <Icon source="chart-bar" size={30} /> }} />
@@ -66,6 +78,11 @@ const TabNavigator = () => {
                         options={{ title: 'Bàn', tabBarIcon: () => <Icon source="table-furniture" size={30} /> }} />
                     <Tab.Screen name="invoices" component={Invoices}
                         options={{ title: 'Hóa Đơn', tabBarIcon: () => <Icon source="receipt-text" size={30} /> }} />
+
+                    {user !== null && (
+                        <Tab.Screen name="chat" component={ChatStack}
+                            options={{ title: 'Chat', tabBarIcon: () => <Icon source="chat" size={30} /> }} />
+                    )}
                 </>
             )}
 
