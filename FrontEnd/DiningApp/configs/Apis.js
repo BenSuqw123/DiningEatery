@@ -4,23 +4,32 @@ import axios from "axios";
 export const endpoints = {
     dishes:    "/dishes/",
     tables:    "/tables/",
+    booked_times: (id) => `/tables/${id}/booked-times/`,
     invoices:  "/invoices/",
     categories: "/categories/",
     chefs:     "/chefs/",
     ingredients: "/ingredients/",
+    bookCheckin: (id) => `/tables/${id}/bookedTimes/`,
     checkin:   (id) => `/tables/${id}/checkin/`,
     order:     (id) => `/tables/${id}/order/`,
     checkout:  (id) => `/tables/${id}/checkout/`,
+    cancel:    (id) => `/tables/${id}/cancel-checkin/`,
     rates:     (id) => `/dishes/${id}/rates/`,
     login:     "/o/token/",
     register:  "/users/",
     current_user: "/users/current-user/",
+    compare_dishes: (ids) => `/dishes/compare/?ids=${ids}`,
+
 
     //CHAT REALTIME
     chat_room:    "/chats/room/",
     chat_send:    "/chats/send/",
     chat_history: "/chats/history/",
-    chat_my_rooms: "/chats/my-rooms/",
+    chat_room_chef: "/chats/room-chef/",
+
+    //ADMIN
+    'pending-chefs': '/chefs/pending/',
+    'approve-chef': (id) => `/chefs/${id}/approve/`,
 }
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;

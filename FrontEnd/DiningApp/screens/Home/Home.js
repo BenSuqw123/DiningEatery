@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, TouchableOpacity, View, Text } from "react-native";
 import Apis, { endpoints } from "../../configs/Apis";
-import { List, Searchbar } from "react-native-paper";
+import { List, Searchbar, FAB, Banner } from "react-native-paper";
 import Styles from "../../styles/Styles";
 import { useNavigation } from "@react-navigation/native";
 
 const Home = ({ cateId }) => {
-    const [dishes, setDishes] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [q, setQ] = useState("");
-    const [page, setPage] = useState(1);
+    const [dishes, setDishes]       = useState([]);
+    const [loading, setLoading]     = useState(false);
+    const [q, setQ]                 = useState("");
+    const [page, setPage]           = useState(1);
+    const [compareMode, setCompareMode] = useState(false);
+    const [selected, setSelected]   = useState([]);
     const nav = useNavigation();
 
     const loadDishes = async () => {
@@ -57,34 +59,84 @@ const Home = ({ cateId }) => {
         }).join(", ");
     }
 
+    const toggleCompareMode = () => {
+        setCompareMode(!compareMode);
+        setSelected([]);
+    };
+
+    const toggleSelect = (item) => {
+        setSelected((prev) => {
+            if (prev.find((d) => d.id === item.id)) return prev.filter((d) => d.id !== item.id);
+            if (prev.length >= 5) return prev;
+            return [...prev, item];
+        });
+    };
+
+    const goCompare = () => {
+        nav.navigate("CompareDish", { selectedDishes: selected });
+        setCompareMode(false);
+        setSelected([]);
+    };
+
     return (
         <View style={{ flex: 1 }}>
-            <Searchbar value={q} onChangeText={setQ}
-                placeholder="Tìm món ăn..." />
-            <FlatList onEndReached={loadMore}
+            <Searchbar value={q} onChangeText={setQ} placeholder="Tìm món ăn..." />
+
+            {compareMode && (
+                <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#e0e0e0" }}>
+                    <Text style={{ fontSize: 13, color: "#555" }}>
+                        Đã chọn {selected.length}/5 món
+                    </Text>
+                    <TouchableOpacity onPress={toggleCompareMode}>
+                        <Text style={{ fontSize: 13, color: "#888" }}>Hủy</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            <FlatList
+                onEndReached={loadMore}
                 ListFooterComponent={loading && <ActivityIndicator />}
                 data={dishes}
                 keyExtractor={item => item.id.toString()}
-                renderItem={({ item }) =>
-                    <List.Item
-                        title={item.name}
-                        description={`${item.price} VNĐ`}
-                        left={() =>
-                            <TouchableOpacity onPress={() => nav.navigate('DishDetail', { dishId: item.id })}>
-                                <Image style={Styles.avatar} source={{ uri: item.image }} />
-                            </TouchableOpacity>
-                        }
-                        right={() =>
-                            <View style={{ justifyContent: "center", alignItems: "flex-end", maxWidth: 110 }}>
-                                <Text style={{ fontSize: 11, color: "#888" }}>Đầu bếp</Text>
-                                <Text style={{ fontSize: 12, color: "#555", textAlign: "right" }} numberOfLines={2}>
-                                    {getChefNames(item.chefs)}
-                                </Text>
-                            </View>
-                        }
-                    />
-                }
+                renderItem={({ item }) => {
+                    const isSelected = selected.some((d) => d.id === item.id);
+                    const disabled   = compareMode && !isSelected && selected.length >= 5;
+                    return (
+                        <TouchableOpacity onPress={() => compareMode ? toggleSelect(item) : nav.navigate("DishDetail", { dishId: item.id })}>
+                            <List.Item
+                                title={item.name}
+                                description={`${item.price} VNĐ`}
+                                titleStyle={isSelected ? { fontWeight: "700" } : {}}
+                                style={{ backgroundColor: isSelected ? "#f0f0f0" : "#fff" }}
+                                left={() => (
+                                    <View>
+                                        <Image style={Styles.avatar} source={{ uri: item.image }} />
+                                        {isSelected && (
+                                            <View style={{ position: "absolute", top: 0, right: 0, width: 18, height: 18, borderRadius: 9, backgroundColor: "#333", alignItems: "center", justifyContent: "center" }}>
+                                                <Text style={{ color: "#fff" }}>✓</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                )}
+                                right={() => (
+                                    <View style={{ justifyContent: "center", alignItems: "flex-end", maxWidth: 110 }}>
+                                        <Text >Đầu bếp</Text>
+                                        <Text numberOfLines={2}>
+                                            {getChefNames(item.chefs)}
+                                        </Text>
+                                    </View>
+                                )}
+                            />
+                        </TouchableOpacity>
+                    );
+                }}
             />
+
+            {compareMode ? (
+                <FAB label={`So sánh ${selected.length} món`} disabled={selected.length < 2} onPress={goCompare} style={{ position: "absolute", bottom: 20, right: 16, backgroundColor: selected.length >= 2 ? "#333" : "#ccc" }} color="#fff"/>
+            ) : (
+                <FAB label={`So sánh món`} onPress={toggleCompareMode} style={{ position: "absolute", bottom: 20, right: 16, backgroundColor: "#333" }} color="#fff"/>
+            )}
         </View>
     );
 }
