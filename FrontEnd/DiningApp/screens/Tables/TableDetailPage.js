@@ -1,213 +1,343 @@
-import { useContext, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useContext, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, FlatList, Image, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Button, TextInput } from "react-native-paper";
 import Apis, { authApis, endpoints } from "../../configs/Apis";
 import { MyUserContext } from "../../configs/MyContext";
+import Styles from "./TableDetailStyles";
 
+// ── helpers ───────────────────────────────────────────────────────────────────
 const pad = n => String(n).padStart(2, "0");
-
-const getDefaultStartTime = () => {
-    const d = new Date(Date.now() + 60 * 60 * 1000);
-    d.setMinutes(0, 0, 0);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmt = v => {
+    const d = new Date(v);
+    return isNaN(d) ? "Chưa rõ" : d.toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 };
-
-const parseDate = value => {
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d;
+const fmtPrice = p => Number(p).toLocaleString("vi-VN", { style: "currency", currency: "VND" });
+const fmtCd = s => s === null ? "" : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
+const toApiDate = d => {
+    const off = -d.getTimezoneOffset(), sg = off >= 0 ? "+" : "-", a = Math.abs(off);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00${sg}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
 };
+const now0 = new Date();
+const defaultTime = `${now0.getFullYear()}-${pad(now0.getMonth() + 1)}-${pad(now0.getDate())}T${pad(now0.getHours())}:${pad(now0.getMinutes())}`;
 
-const addHours = (date, hours) => new Date(date.getTime() + hours * 60 * 60 * 1000);
-
-const formatApiDate = date => {
-    const offset = -date.getTimezoneOffset();
-    const sign = offset >= 0 ? "+" : "-";
-    const abs = Math.abs(offset);
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-};
-
-const formatTime = value => {
-    const d = typeof value === "string" ? parseDate(value) : value;
-    if (!d) return "Chưa rõ";
-    return d.toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-};
-
+// ─────────────────────────────────────────────────────────────────────────────
 const TableDetailPage = ({ route, navigation }) => {
     const { table } = route.params;
     const [user] = useContext(MyUserContext);
 
-    const [currentTable, setCurrentTable] = useState(table);
     const [bookedSlots, setBookedSlots] = useState([]);
-    const [bookCheckin, setBookCheckin] = useState(null);
-    const [startTime, setStartTime] = useState(getDefaultStartTime());
+    const [myBooking, setMyBooking] = useState(null);
+    const [startTime, setStartTime] = useState(defaultTime);
     const [note, setNote] = useState("");
+    const [isDining, setIsDining] = useState(false);
+    const [dishes, setDishes] = useState([]);
+    const [cart, setCart] = useState({});
+    const [showModal, setShowModal] = useState(false);
+    const [invoice, setInvoice] = useState(null);
+    const [timeLeft, setTimeLeft] = useState(null);
     const [loading, setLoading] = useState(false);
-    const [actionLoading, setActionLoading] = useState(false);
-    const [error, setError] = useState("");
-    const [timeError, setTimeError] = useState("");
+    const [orderLoading, setOrderLoading] = useState(false);
 
-    const startDate = parseDate(startTime);
-    const endDate = startDate ? addHours(startDate, 2) : null;
-    const isMyBooking = !!bookCheckin;
+    const timer = useRef(null);
+    const invoiceRef = useRef(null);
+    useEffect(() => { invoiceRef.current = invoice; }, [invoice]);
+    useEffect(() => () => clearInterval(timer.current), []);
 
-    const loadBookedTimes = async () => {
-        try {
-            const res = await Apis.get(endpoints.booked_times(currentTable.id));
-            setBookedSlots(res.data.results || res.data);
-        } catch (err) {
-            console.log(err.response?.data || err.message);
-        }
+    // ── countdown — dùng lại khi restore ─────────────────────────────────────
+    const startCountdown = (endTimeStr) => {
+        clearInterval(timer.current);
+        timer.current = setInterval(() => {
+            const rem = Math.floor((new Date(endTimeStr) - Date.now()) / 1000);
+            if (rem <= 0) {
+                clearInterval(timer.current);
+                setTimeLeft(0);
+                setIsDining(false);
+                setShowModal(false);
+                navigation.replace("PaymentPage", { table, invoice: invoiceRef.current });
+            } else {
+                setTimeLeft(rem);
+            }
+        }, 1000);
     };
 
-    const loadBookCheckin = async () => {
-        try {
-            const token = await AsyncStorage.getItem("token");
-            if (!token) return setBookCheckin(null);
-            const res = await authApis(token).get(endpoints.bookCheckin(currentTable.id));
-            setBookCheckin(res.data);
-        } catch (err) {
-            setBookCheckin(null);
-        }
-    };
-
+    // ── load data — fetch booking + invoice, tự restore isDining ─────────────
     const loadData = async () => {
-        setLoading(true);
-        await loadBookedTimes();
-        await loadBookCheckin();
-        setLoading(false);
+        try {
+            setLoading(true);
+            const res = await Apis.get(endpoints.bookCheckin(table.id));
+            const data = res.data.results ?? res.data;
+            setBookedSlots(Array.isArray(data) ? data : []);
+
+            const token = await AsyncStorage.getItem("token");
+            if (!token || !user) return;
+
+            // Lấy booking của user
+            const res2 = await authApis(token).get(endpoints.bookCheckin(table.id));
+            const data2 = res2.data.results ?? res2.data;
+            const mine = (Array.isArray(data2) ? data2 : []).find(s => s.customer_id === user.id) ?? null;
+            setMyBooking(mine);
+
+            // Nếu có booking → fetch invoice chưa thanh toán
+            if (mine) {
+                try {
+                    const res3 = await authApis(token).get(endpoints.invoices + `?table=${table.id}`);
+                    const inv = res3.data.results ?? res3.data;
+                    const found = (Array.isArray(inv) ? inv : []).find(i => !i.is_paid) ?? null;
+                    setInvoice(found);
+
+                    // Restore isDining: nếu đang trong khung giờ ăn → tự bật lại
+                    const now = new Date();
+                    const start = new Date(mine.start_time);
+                    const end = new Date(mine.end_time);
+                    if (now >= start && now < end) {
+                        setIsDining(true);
+                        startCountdown(mine.end_time);
+                        // Load dishes sẵn để gọi món được luôn
+                        if (!dishes.length) {
+                            const rd = await Apis.get(endpoints.dishes);
+                            const dd = rd.data.results ?? rd.data;
+                            setDishes(Array.isArray(dd) ? dd : []);
+                        }
+                    }
+                } catch { }
+            }
+        } catch (e) {
+            console.warn(e);
+        } finally {
+            setLoading(false);
+        }
+    };
+    useEffect(() => { loadData(); }, []);
+
+    // ── load danh sách món ────────────────────────────────────────────────────
+    const loadDishes = async () => {
+        try {
+            const res = await Apis.get(endpoints.dishes);
+            const data = res.data.results ?? res.data;
+            setDishes(Array.isArray(data) ? data : []);
+        } catch (e) { console.warn(e); }
     };
 
-    useEffect(() => {
-        loadData();
-    }, [currentTable.id]);
-
-    const requireLogin = async () => {
-        const token = await AsyncStorage.getItem("token");
-        if (token && user) return token;
-
-        Alert.alert("Cần đăng nhập", "Vui lòng đăng nhập để tiếp tục.", [
-            { text: "Để sau", style: "cancel" },
-            { text: "Đăng nhập", onPress: () => navigation.getParent?.()?.navigate("user", { screen: "login" }) },
-        ]);
-
-        return null;
-    };
-
-    const isOverlap = () => {
-        if (!startDate || !endDate) return false;
-
-        return bookedSlots.some(slot => {
-            const slotStart = parseDate(slot.start_time);
-            const slotEnd = parseDate(slot.end_time);
-            if (!slotStart || !slotEnd) return false;
-            return startDate < slotEnd && endDate > slotStart;
-        });
-    };
-
+    // ── đặt bàn ───────────────────────────────────────────────────────────────
     const handleReserve = async () => {
-        const token = await requireLogin();
-        if (!token) return;
+        if (!user) {
+            return Alert.alert("Cần đăng nhập", "Vui lòng đăng nhập để đặt bàn.", [
+                { text: "Để sau", style: "cancel" },
+                { text: "Đăng nhập", onPress: () => navigation.navigate("user") },
+            ]);
+        }
+        const token = await AsyncStorage.getItem("token");
+        const start = new Date(startTime);
+        if (isNaN(start)) return Alert.alert("Thời gian không hợp lệ");
+        if (start <= new Date()) return Alert.alert("Không thể đặt trong quá khứ");
 
-        setError("");
-        setTimeError("");
-
-        if (!startDate) return setTimeError("Vui lòng nhập thời gian hợp lệ.");
-        if (startDate <= new Date()) return setTimeError("Không thể đặt thời gian trong quá khứ.");
-        if (isOverlap()) return setTimeError("Khung giờ này đã được đặt. Vui lòng chọn giờ khác.");
+        const end = new Date(start.getTime() + 7200000);
+        const overlap = bookedSlots.some(s => {
+            const a = new Date(s.start_time), b = new Date(s.end_time);
+            return start < b && end > a;
+        });
+        if (overlap) return Alert.alert("Khung giờ này đã có người đặt");
 
         try {
-            setActionLoading(true);
-            await authApis(token).post(endpoints.checkin(currentTable.id), { start_time: formatApiDate(startDate), note });
-            setCurrentTable({ ...currentTable, status: "BOOKED" });
-            Alert.alert("Thành công", "Đặt bàn thành công!");
-            await loadData();
-        } catch (err) {
-            setError(err.response?.data?.error || err.response?.data?.detail || "Không thể đặt bàn.");
-        } finally {
-            setActionLoading(false);
+            await authApis(token).post(endpoints.checkin(table.id), { start_time: toApiDate(start), note });
+            Alert.alert("Đặt bàn thành công!");
+            loadData();
+        } catch (e) {
+            Alert.alert("Lỗi", e.response?.data?.error ?? e.response?.data?.detail ?? "Không thể đặt bàn");
         }
     };
 
+    // ── hủy bàn ───────────────────────────────────────────────────────────────
     const handleCancel = async () => {
-        const token = await requireLogin();
+        const token = await AsyncStorage.getItem("token");
         if (!token) return;
-
-        Alert.alert("Hủy đặt bàn", "Bạn chắc chắn muốn hủy đặt bàn này?", [
+        Alert.alert("Hủy đặt bàn", "Bạn chắc chắn muốn hủy?", [
             { text: "Không", style: "cancel" },
             {
-                text: "Hủy bàn",
-                style: "destructive",
-                onPress: async () => {
+                text: "Hủy bàn", style: "destructive", onPress: async () => {
                     try {
-                        setActionLoading(true);
-                        await authApis(token).patch(endpoints.cancel(currentTable.id));
-                        setCurrentTable({ ...currentTable, status: "AVAILABLE" });
-                        Alert.alert("Thành công", "Đã hủy đặt bàn.");
-                        await loadData();
-                    } catch (err) {
-                        setError(err.response?.data?.error || err.response?.data?.detail || "Không thể hủy bàn.");
-                    } finally {
-                        setActionLoading(false);
-                    }
-                },
+                        await authApis(token).patch(endpoints.cancel(table.id));
+                        setIsDining(false);
+                        setInvoice(null);
+                        clearInterval(timer.current);
+                        loadData();
+                    } catch (e) { Alert.alert("Lỗi", e.response?.data?.error ?? "Không thể hủy"); }
+                }
             },
         ]);
     };
 
-    if (loading) return (
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-            <ActivityIndicator size="large" />
-            <Text>Đang tải chi tiết bàn...</Text>
-        </View>
-    );
+    // ── bắt đầu dùng bữa ─────────────────────────────────────────────────────
+    const handleStartDining = async () => {
+        const now = new Date();
+        if (now < new Date(myBooking.start_time))
+            return Alert.alert("Chưa đến giờ", `Bàn bắt đầu lúc ${fmt(myBooking.start_time)}`);
+        if (now > new Date(myBooking.end_time))
+            return Alert.alert("Hết giờ");
+
+        if (!dishes.length) await loadDishes();
+        setIsDining(true);
+        startCountdown(myBooking.end_time);
+    };
+
+    // ── gọi món ───────────────────────────────────────────────────────────────
+    const handleOrder = async () => {
+        const token = await AsyncStorage.getItem("token");
+        if (!token) return;
+        if (new Date() > new Date(myBooking?.end_time))
+            return Alert.alert("Hết giờ", "Không thể gọi món sau thời gian sử dụng bàn");
+        try {
+            setOrderLoading(true);
+            let last = null;
+            for (const [dish_id, quantity] of Object.entries(cart)) {
+                const res = await authApis(token).post(endpoints.order(table.id), { dish_id: Number(dish_id), quantity });
+                last = res.data;
+            }
+            setInvoice(last);
+            setCart({});
+            setShowModal(false);
+            Alert.alert("Đã gọi món!");
+        } catch (e) {
+            Alert.alert("Lỗi", e.response?.data?.error ?? "Không thể gọi món");
+        } finally { setOrderLoading(false); }
+    };
+
+    const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
+    const cartTotal = Object.entries(cart).reduce((s, [id, q]) =>
+        s + (dishes.find(d => String(d.id) === id)?.price ?? 0) * q, 0);
+    const adjust = (id, d) => setCart(p => {
+        const q = (p[id] ?? 0) + d;
+        if (q <= 0) { const n = { ...p }; delete n[id]; return n; }
+        return { ...p, [id]: q };
+    });
+
+    if (loading) return <ActivityIndicator style={{ flex: 1 }} size="large" />;
 
     return (
-        <ScrollView style={{ flex: 1, backgroundColor: "#f7f5f2" }} contentContainerStyle={{ padding: 16, paddingTop: 50 }}>
-            <Text style={{ fontSize: 24, fontWeight: "700", marginBottom: 8 }}>{currentTable.code || `Bàn #${currentTable.id}`}</Text>
+        <ScrollView style={Styles.screen}>
 
-            <View style={{ backgroundColor: "#fff", borderRadius: 10, padding: 14, marginBottom: 12 }}>
-                <Text>Vị trí: {currentTable.location || "Chưa cập nhật"}</Text>
-                <Text>Sức chứa: {currentTable.capacity || 0} người</Text>
-                <Text>Trạng thái: {currentTable.status}</Text>
+            <Text style={Styles.pageTitle}>{table.code || `Bàn #${table.id}`}</Text>
+
+            {/* Thông tin bàn */}
+            <View style={Styles.card}>
+                <Text>Vị trí: {table.location || "Chưa cập nhật"}</Text>
+                <Text>Sức chứa: {table.capacity || 0} người</Text>
+                <Text>Trạng thái: {table.status}</Text>
             </View>
 
-            {!!error && <Text style={{ color: "red", marginBottom: 10 }}>{error}</Text>}
-
-            <View style={{ backgroundColor: "#fff", borderRadius: 10, padding: 14, marginBottom: 12 }}>
-                <Text style={{ fontSize: 16, fontWeight: "700", marginBottom: 8 }}>Khung giờ đã đặt</Text>
-                {bookedSlots.length === 0 ? <Text>Chưa có khung giờ nào.</Text> : bookedSlots.map((slot, index) => (
-                    <Text key={index}>{formatTime(slot.start_time)} - {formatTime(slot.end_time)}</Text>
-                ))}
+            {/* Khung giờ đã đặt */}
+            <View style={Styles.card}>
+                <Text style={Styles.cardTitle}>Khung giờ đã đặt</Text>
+                {bookedSlots.length === 0
+                    ? <Text style={Styles.emptyText}>Chưa có.</Text>
+                    : bookedSlots.map((s, i) => <Text key={i}>{fmt(s.start_time)} – {fmt(s.end_time)}</Text>)
+                }
             </View>
 
-            {!isMyBooking && (
-                <View style={{ backgroundColor: "#fff", borderRadius: 10, padding: 14, marginBottom: 12 }}>
-                    <Text style={{ fontSize: 16, fontWeight: "700", marginBottom: 10 }}>Đặt bàn</Text>
-
-                    <Text>Thời gian bắt đầu</Text>
-                    <TextInput value={startTime} onChangeText={value => { setStartTime(value); setTimeError(""); }} placeholder="YYYY-MM-DDTHH:mm" style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 10, marginBottom: 6 }} />
-
-                    {!!timeError && <Text style={{ color: "red", marginBottom: 8 }}>{timeError}</Text>}
-                    <Text style={{ marginBottom: 10 }}>Kết thúc: {endDate ? formatTime(endDate) : "Tự động +2 tiếng"}</Text>
-
-                    <Text>Ghi chú</Text>
-                    <TextInput value={note} onChangeText={setNote} placeholder="Ghi chú nếu có" multiline style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 10, minHeight: 70, marginBottom: 12 }} />
-
-                    <TouchableOpacity onPress={handleReserve} disabled={actionLoading} style={{ backgroundColor: "#2E7D52", borderRadius: 8, padding: 12, alignItems: "center" }}>
-                        <Text style={{ color: "#fff", fontWeight: "700" }}>{actionLoading ? "Đang xử lý..." : "Đặt bàn"}</Text>
-                    </TouchableOpacity>
+            {/* Form đặt bàn */}
+            {!myBooking && (
+                <View style={Styles.card}>
+                    <Text style={Styles.cardTitle}>Đặt bàn</Text>
+                    <TextInput label="Thời gian (YYYY-MM-DDTHH:mm)" value={startTime} onChangeText={setStartTime} mode="outlined" style={{ marginBottom: 8 }} />
+                    <TextInput label="Ghi chú" value={note} onChangeText={setNote} mode="outlined" multiline style={{ marginBottom: 8 }} />
+                    <Button mode="contained" onPress={handleReserve}>
+                        {user ? "Đặt bàn" : "Đăng nhập để đặt bàn"}
+                    </Button>
                 </View>
             )}
 
-            {isMyBooking && (
-                <TouchableOpacity onPress={handleCancel} disabled={actionLoading} style={{ backgroundColor: "#c2410c", borderRadius: 8, padding: 12, alignItems: "center", marginBottom: 12 }}>
-                    <Text style={{ color: "#fff", fontWeight: "700" }}>Hủy đặt bàn của tôi</Text>
-                </TouchableOpacity>
+            {/* Panel booking */}
+            {!!myBooking && (
+                <View style={Styles.card}>
+                    <Text style={Styles.cardTitle}>Lịch đặt của bạn</Text>
+                    <Text style={{ marginBottom: 8 }}>{fmt(myBooking.start_time)} – {fmt(myBooking.end_time)}</Text>
+
+                    {isDining && timeLeft !== null && (
+                        <View style={Styles.countdown}>
+                            <Text style={Styles.cdLabel}>Thời gian còn lại</Text>
+                            <Text style={[Styles.cdTime, timeLeft < 300 && Styles.cdTimeUrgent]}>
+                                {fmtCd(timeLeft)}
+                            </Text>
+                        </View>
+                    )}
+
+                    {!isDining &&
+                        <Button mode="contained" onPress={handleStartDining} style={{ marginBottom: 8 }} buttonColor="#1565C0">
+                            Bắt đầu dùng bữa
+                        </Button>
+                    }
+                    {isDining &&
+                        <Button mode="contained" onPress={() => setShowModal(true)} style={{ marginBottom: 8 }} buttonColor="#F57F17">
+                            Gọi món{cartCount > 0 ? ` (${cartCount})` : ""}
+                        </Button>
+                    }
+
+                    {!!invoice && (
+                        <View style={Styles.invoiceBox}>
+                            <Text style={Styles.invoiceTitle}>Hoá đơn tạm</Text>
+                            {(invoice.details ?? []).map((d, i) => (
+                                <Text key={i}>{d.dish_name ?? `Món #${d.dish}`} × {d.quantity} — {fmtPrice((d.unit_price ?? 0) * d.quantity)}</Text>
+                            ))}
+                            <Text style={Styles.invoiceTotal}>Tổng: {fmtPrice(invoice.total_amount ?? 0)}</Text>
+                        </View>
+                    )}
+
+                    {!isDining
+                        ? <Button mode="contained" onPress={handleCancel} buttonColor="#c2410c">Hủy đặt bàn</Button>
+                        : <Button mode="contained" onPress={() => navigation.navigate("PaymentPage", { table, invoice })} buttonColor="#6A1B9A">Thanh toán</Button>
+                    }
+                </View>
             )}
 
-            <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 12, alignItems: "center" }}>
-                <Text>Quay lại</Text>
-            </TouchableOpacity>
+            <Button onPress={() => navigation.goBack()} style={{ marginTop: 8 }}>Quay lại</Button>
+
+            {/* Modal chọn món */}
+            <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
+                <View style={Styles.modalContainer}>
+                    <View style={Styles.modalHeader}>
+                        <Text style={Styles.modalTitle}>Chọn món ăn</Text>
+                        <TouchableOpacity onPress={() => setShowModal(false)}>
+                            <Text style={{ fontSize: 16 }}>✕ Đóng</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    <FlatList
+                        data={dishes}
+                        keyExtractor={d => String(d.id)}
+                        contentContainerStyle={Styles.modalList}
+                        renderItem={({ item }) => (
+                            <View style={Styles.dishItem}>
+                                {!!item.image && <Image source={{ uri: item.image }} style={Styles.dishImage} />}
+                                <View style={Styles.dishInfo}>
+                                    <Text style={Styles.dishName}>{item.name}</Text>
+                                    <Text style={Styles.dishPrice}>{fmtPrice(item.price)}</Text>
+                                </View>
+                                <View style={Styles.stepper}>
+                                    <TouchableOpacity onPress={() => adjust(item.id, -1)} style={Styles.stepBtn}>
+                                        <Text style={Styles.stepBtnTxt}>−</Text>
+                                    </TouchableOpacity>
+                                    <Text style={Styles.stepQty}>{cart[item.id] ?? 0}</Text>
+                                    <TouchableOpacity onPress={() => adjust(item.id, 1)} style={Styles.stepBtn}>
+                                        <Text style={Styles.stepBtnTxt}>+</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+                    />
+
+                    <View style={Styles.modalFooter}>
+                        {cartCount > 0 && <Text style={Styles.modalCartText}>{cartCount} món · {fmtPrice(cartTotal)}</Text>}
+                        <Button mode="contained" onPress={handleOrder} loading={orderLoading}
+                            disabled={orderLoading || cartCount === 0}
+                            buttonColor={cartCount === 0 ? "#aaa" : "#2E7D52"}
+                            style={{ width: "100%" }}>
+                            Xác nhận gọi món
+                        </Button>
+                    </View>
+                </View>
+            </Modal>
+
         </ScrollView>
     );
 };
