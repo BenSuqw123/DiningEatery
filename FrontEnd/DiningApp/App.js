@@ -19,9 +19,11 @@ import AdminStats from "./screens/Admin/AdminStats";
 import ChatListScreen from "./screens/Chat/ChatListScreen";
 import ChatScreen from "./screens/Chat/ChatScreen";
 import TableDetailPage from "./screens/Tables/TableDetailPage";
+import PaymentPage from "./screens/Tables/PaymentPage";
 import CompareDish from "./screens/Home/CompareDish";
 import DishDetail from "./screens/Home/DishDetail";
 import ApprovalChef from "./screens/ApprovalChef.js/ApprovalChef";
+
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -39,7 +41,7 @@ const StackNavigator = () => {
                 )}
             </Stack.Screen>
             <Stack.Screen name="CompareDish" component={CompareDish} />
-            <Stack.Screen name="DishDetail" component={DishDetail} />  
+            <Stack.Screen name="DishDetail" component={DishDetail} />
         </Stack.Navigator>
     );
 }
@@ -54,6 +56,7 @@ const TableStack = () => (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="TablesMain" component={Tables} />
         <Stack.Screen name="TableDetailPage" component={TableDetailPage} />
+        <Stack.Screen name="PaymentPage" component={PaymentPage} />
     </Stack.Navigator>
 );
 const AuthStack = () => (
@@ -65,24 +68,24 @@ const AuthStack = () => (
 );
 
 const TabNavigator = () => {
-    const [user, ] = useContext(MyUserContext);
+    const [user,] = useContext(MyUserContext);
     return (
         <Tab.Navigator>
-            
+
 
             {user?.role === 'CHEF' ? (
                 <>
-                <Tab.Screen name="manage" component={ManageDish}
-                    options={{ title: 'Quản lý món', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
-                <Tab.Screen name="chat" component={ChatStack}
-                    options={{ title: 'Chat', tabBarIcon: () => <Icon source="chat" size={30} /> }} />
+                    <Tab.Screen name="manage" component={ManageDish}
+                        options={{ title: 'Quản lý món', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
+                    <Tab.Screen name="chat" component={ChatStack}
+                        options={{ title: 'Chat', tabBarIcon: () => <Icon source="chat" size={30} /> }} />
                 </>
             ) : user?.role === 'ADMIN' ? (
                 <>
-                <Tab.Screen name="stats" component={AdminStats}
-                    options={{ title: 'Thống kê', tabBarIcon: () => <Icon source="chart-bar" size={30} /> }} />
-                <Tab.Screen name="approval-chef" component={ApprovalChef}
-                    options={{ title: 'Duyệt đầu bếp', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />    
+                    <Tab.Screen name="stats" component={AdminStats}
+                        options={{ title: 'Thống kê', tabBarIcon: () => <Icon source="chart-bar" size={30} /> }} />
+                    <Tab.Screen name="approval-chef" component={ApprovalChef}
+                        options={{ title: 'Duyệt đầu bếp', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
                 </>
             ) : (
                 <>
