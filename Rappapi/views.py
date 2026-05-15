@@ -1,7 +1,7 @@
 import secrets
 from datetime import timedelta
 from django.utils import timezone
-
+from django.db import transaction as db_transaction
 from oauth2_provider.models import Application, AccessToken, RefreshToken
 from oauth2_provider.settings import oauth2_settings
 from rest_framework import viewsets, generics, filters, status, parsers, permissions
@@ -9,7 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 import json
 from Rappapi.models import (
-    User, Dish, Ingredient, Rate, Category, Table,
+    User, Dish, Ingredient, Rate, Category, Table, TableBook,
     TableStatus, PaymentMethod, Invoice, InvoiceDetail, Chef, Customer, Admin
 )
 from Rappapi import serializers, paginators
@@ -360,3 +360,252 @@ class ChatViewSet(viewsets.ViewSet):
                 room['customer_name'] = "Khách hàng"
                 room['customer_avatar'] = None
         return Response(rooms, status=status.HTTP_200_OK)
+class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
+    queryset = Table.objects.filter(active=True)
+    serializer_class = serializers.TableSerializer
+
+    # ── Helper ──────────────────────────────────────────────
+    def get_active_table_book(self, table, user):
+        if not hasattr(user, 'customer'):
+            return None
+        return TableBook.objects.filter(
+            table=table,
+            customer=user,
+            status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED]
+        ).order_by('-id').first()
+
+    # ── booked-times ────────────────────────────────────────
+    @action(detail=True, methods=['get'], url_path='booked-times')
+    def booked_times(self, request, pk=None):
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
+
+        books = TableBook.objects.filter(
+            table=table,
+            status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED]
+        ).order_by('start_time')
+
+        data = [
+            {
+                "id": b.id,
+                "start_time": b.start_time,
+                "end_time": b.end_time,
+                "status": b.status,
+                "customer_id": b.customer_id,
+                "note": b.note or ""
+            }
+            for b in books
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+    # ── check-in ─────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='checkin',
+            permission_classes=[permissions.IsAuthenticated])
+    def check_in(self, request, pk=None):
+        if not hasattr(request.user, 'customer'):
+            return Response({"error": "Chỉ khách hàng mới được đặt bàn."}, status=status.HTTP_403_FORBIDDEN)
+
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
+
+        start_time = request.data.get('start_time')
+        note = request.data.get('note', '')
+
+        if not start_time:
+            return Response({"error": "Vui lòng chọn thời gian đặt bàn."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_time = timezone.datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        except Exception:
+            return Response({"error": "Thời gian đặt bàn không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if timezone.is_naive(start_time):
+            start_time = timezone.make_aware(start_time)
+
+        if start_time < timezone.now():
+            return Response({"error": "Không thể đặt bàn trong quá khứ."}, status=status.HTTP_400_BAD_REQUEST)
+
+        end_time = start_time + timedelta(hours=2)
+
+        active_booking = TableBook.objects.filter(
+            customer=request.user,
+            status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED]
+        ).first()
+        if active_booking:
+            return Response({"error": "Bạn đang có bàn chưa hoàn thành."}, status=status.HTTP_400_BAD_REQUEST)
+
+        overlap = TableBook.objects.filter(
+            table=table,
+            status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED],
+            start_time__lt=end_time,
+            end_time__gt=start_time
+        ).exists()
+        if overlap:
+            return Response({"error": "Khung giờ này đã có người đặt."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with db_transaction.atomic():
+                TableBook.objects.create(
+                    table=table, customer=request.user,
+                    start_time=start_time, end_time=end_time,
+                    status=TableStatus.BOOKED, note=note
+                )
+                Invoice.objects.create(
+                    customer=request.user, table=table,
+                    total_amount=0, is_paid=False, transaction_id=None
+                )
+                table.status = TableStatus.BOOKED
+                table.save()
+                update_firebase_table(table_id=table.code, status=TableStatus.BOOKED.value, total_price=0)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(serializers.TableSerializer(table).data, status=status.HTTP_200_OK)
+
+    # ── cancel-checkin ───────────────────────────────────────
+    @action(detail=True, methods=['patch'], url_path='cancel-checkin',
+            permission_classes=[permissions.IsAuthenticated])
+    def cancel_check_in(self, request, pk=None):
+        if not hasattr(request.user, 'customer'):
+            return Response({"error": "Chỉ khách hàng mới được hủy đặt bàn."}, status=status.HTTP_403_FORBIDDEN)
+
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
+
+        table_book = TableBook.objects.filter(
+            table=table, customer=request.user, status=TableStatus.BOOKED
+        ).order_by('-id').first()
+        if not table_book:
+            return Response({"error": "Không tìm thấy lượt đặt bàn để hủy."}, status=status.HTTP_400_BAD_REQUEST)
+
+        invoice = Invoice.objects.filter(table=table, customer=request.user, is_paid=False).first()
+        if invoice and invoice.details.exists():
+            return Response({"error": "Không thể hủy khi đã gọi món."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with db_transaction.atomic():
+                if invoice:
+                    invoice.delete()
+                table_book.delete()
+                table.status = TableStatus.AVAILABLE
+                table.save()
+                update_firebase_table(table_id=table.code, status=TableStatus.AVAILABLE.value, total_price=0)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(serializers.TableSerializer(table).data, status=status.HTTP_200_OK)
+
+    # ── order ────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='order',
+            permission_classes=[permissions.IsAuthenticated])
+    def order_dish(self, request, pk=None):
+        # ✅ Bảo mật: chỉ customer
+        if not hasattr(request.user, 'customer'):
+            return Response({"error": "Chỉ khách hàng mới được gọi món."}, status=status.HTTP_403_FORBIDDEN)
+
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            quantity = int(request.data.get('quantity', 1))
+            if quantity < 1:
+                raise ValueError
+        except (ValueError, TypeError):
+            return Response({"error": "Số lượng không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if table.status not in [TableStatus.BOOKED, TableStatus.OCCUPIED]:
+            return Response({"error": "Bàn chưa được đặt."}, status=status.HTTP_400_BAD_REQUEST)
+
+        dish = Dish.objects.filter(pk=request.data.get('dish_id')).first()
+        if not dish:
+            return Response({"error": "Không tìm thấy món."}, status=status.HTTP_404_NOT_FOUND)
+
+        table_book = self.get_active_table_book(table, request.user)
+        if not table_book:
+            return Response({"error": "Không tìm thấy lượt đặt bàn hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+        # ✅ Bảo mật: chỉ gọi được trong khung giờ
+        if not (table_book.start_time <= now <= table_book.end_time):
+            return Response({"error": "Chỉ được gọi món trong thời gian sử dụng bàn."}, status=status.HTTP_400_BAD_REQUEST)
+
+        invoice = Invoice.objects.filter(table=table, customer=request.user, is_paid=False).first()
+        if not invoice:
+            return Response({"error": "Không tìm thấy hóa đơn hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with db_transaction.atomic():
+                detail, _ = InvoiceDetail.objects.get_or_create(
+                    invoice=invoice, dish=dish, defaults={'quantity': 0}
+                )
+                detail.quantity += quantity
+                detail.save()
+
+                invoice.total_amount += dish.price * quantity
+                invoice.save()
+
+                table.status = TableStatus.OCCUPIED
+                table.save()
+                table_book.status = TableStatus.OCCUPIED
+                table_book.save()
+
+                update_firebase_table(
+                    table_id=table.code,
+                    status=TableStatus.OCCUPIED.value,
+                    total_price=float(invoice.total_amount)
+                )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(serializers.InvoiceSerializer(invoice).data, status=status.HTTP_200_OK)
+
+    # ── checkout ─────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='checkout',
+            permission_classes=[permissions.IsAuthenticated])
+    def checkout(self, request, pk=None):
+        # ✅ Bảo mật: chỉ customer
+        if not hasattr(request.user, 'customer'):
+            return Response({"error": "Chỉ khách hàng mới được thanh toán."}, status=status.HTTP_403_FORBIDDEN)
+
+        table = Table.objects.filter(pk=pk, active=True).first()
+        if not table:
+            return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
+
+        method = request.data.get('method')
+        if not method:
+            return Response({"error": "Vui lòng chọn phương thức thanh toán."}, status=status.HTTP_400_BAD_REQUEST)
+
+        invoice = Invoice.objects.filter(table=table, customer=request.user, is_paid=False).first()
+        if not invoice:
+            return Response({"error": "Không có hóa đơn."}, status=status.HTTP_400_BAD_REQUEST)
+
+        transaction_id = request.data.get('transaction')
+
+        try:
+            with db_transaction.atomic():
+                payment = PaymentFactory.get_strategy(method=method)
+
+                if method != "CASH":
+                    if not transaction_id:
+                        return Response({"error": "Vui lòng cung cấp mã giao dịch."}, status=status.HTTP_400_BAD_REQUEST)
+                    if Invoice.objects.filter(transaction_id=str(transaction_id)).exists():
+                        return Response({"error": "Mã giao dịch đã tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+                    invoice = payment.pay(invoice, table, transaction_id)
+                else:
+                    invoice = payment.pay(invoice, table)
+
+                table_book = self.get_active_table_book(table, request.user)
+                if table_book:
+                    table_book.delete()
+
+                table.status = TableStatus.AVAILABLE
+                table.save()
+                update_firebase_table(table_id=table.code, status=TableStatus.AVAILABLE.value, total_price=0)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(serializers.InvoiceSerializer(invoice).data, status=status.HTTP_200_OK)
