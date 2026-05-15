@@ -67,7 +67,7 @@ const Home = ({ cateId }) => {
     const toggleSelect = (item) => {
         setSelected((prev) => {
             if (prev.find((d) => d.id === item.id)) return prev.filter((d) => d.id !== item.id);
-            if (prev.length >= 5) return prev;
+            if (prev.length >= 3) return prev;
             return [...prev, item];
         });
     };
@@ -85,7 +85,7 @@ const Home = ({ cateId }) => {
             {compareMode && (
                 <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#e0e0e0" }}>
                     <Text style={{ fontSize: 13, color: "#555" }}>
-                        Đã chọn {selected.length}/5 món
+                        Đã chọn {selected.length}/3 món
                     </Text>
                     <TouchableOpacity onPress={toggleCompareMode}>
                         <Text style={{ fontSize: 13, color: "#888" }}>Hủy</Text>
@@ -100,7 +100,7 @@ const Home = ({ cateId }) => {
                 keyExtractor={item => item.id.toString()}
                 renderItem={({ item }) => {
                     const isSelected = selected.some((d) => d.id === item.id);
-                    const disabled   = compareMode && !isSelected && selected.length >= 5;
+                    const disabled   = compareMode && !isSelected && selected.length >= 3;
                     return (
                         <TouchableOpacity onPress={() => compareMode ? toggleSelect(item) : nav.navigate("DishDetail", { dishId: item.id })}>
                             <List.Item
@@ -119,11 +119,17 @@ const Home = ({ cateId }) => {
                                     </View>
                                 )}
                                 right={() => (
-                                    <View style={{ justifyContent: "center", alignItems: "flex-end", maxWidth: 110 }}>
-                                        <Text >Đầu bếp</Text>
-                                        <Text numberOfLines={2}>
-                                            {getChefNames(item.chefs)}
-                                        </Text>
+                                    <View style={{ justifyContent: "center", alignItems: "flex-end", maxWidth: 120 }}>
+                                        <Text style={{ fontSize: 11, color: "#888" }}>Đầu bếp</Text>
+                                        <Text style={{ fontSize: 12, color: "#555", textAlign: "right" }}> {getChefNames(item.chefs)} </Text>
+                                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                                            {item.time_served && (
+                                                <Text style={{ fontSize: 11, color: "#0ea5e9" }}>{item.time_served} phút</Text>
+                                            )}
+                                            {item.avg_rating && (
+                                                <Text style={{ fontSize: 11, color: "#f59e0b" }}>⭐{item.avg_rating}</Text>
+                                            )}
+                                        </View>
                                     </View>
                                 )}
                             />

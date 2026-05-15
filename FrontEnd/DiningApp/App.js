@@ -13,7 +13,6 @@ import Tables from "./screens/Tables/Tables";
 import { MyUserContext, MyUserReducer } from "./configs/MyContext";
 import UserProfile from "./screens/User/UserProfile";
 import ManageDish from "./screens/Chef/ManageDish";
-import { AlertProvider } from "./configs/AlertContext";
 import { PaperProvider } from "react-native-paper";
 import AdminStats from "./screens/Admin/AdminStats";
 import ChatListScreen from "./screens/Chat/ChatListScreen";
@@ -22,6 +21,8 @@ import TableDetailPage from "./screens/Tables/TableDetailPage";
 import CompareDish from "./screens/Home/CompareDish";
 import DishDetail from "./screens/Home/DishDetail";
 import ApprovalChef from "./screens/ApprovalChef.js/ApprovalChef";
+import ChefStats from "./screens/ChefStats/ChefStats";
+import CreateDish from "./screens/Chef/CreateDish";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -56,6 +57,15 @@ const TableStack = () => (
         <Stack.Screen name="TableDetailPage" component={TableDetailPage} />
     </Stack.Navigator>
 );
+
+const ChefStack = () => (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="ManageDish" component={ManageDish} />
+        <Stack.Screen name="CreateDish" component={CreateDish} />
+    </Stack.Navigator>
+);
+
+
 const AuthStack = () => (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="UserMain" component={User} />
@@ -72,14 +82,16 @@ const TabNavigator = () => {
 
             {user?.role === 'CHEF' ? (
                 <>
-                <Tab.Screen name="manage" component={ManageDish}
+                <Tab.Screen name="manage" component={ChefStack}
                     options={{ title: 'Quản lý món', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />
+                <Tab.Screen name="chef-stats" component={ChefStats}
+                    options={{ title: 'Thống kê', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />    
                 <Tab.Screen name="chat" component={ChatStack}
                     options={{ title: 'Chat', tabBarIcon: () => <Icon source="chat" size={30} /> }} />
                 </>
             ) : user?.role === 'ADMIN' ? (
                 <>
-                <Tab.Screen name="stats" component={AdminStats}
+                <Tab.Screen name="admin-stats" component={AdminStats}
                     options={{ title: 'Thống kê', tabBarIcon: () => <Icon source="chart-bar" size={30} /> }} />
                 <Tab.Screen name="approval-chef" component={ApprovalChef}
                     options={{ title: 'Duyệt đầu bếp', tabBarIcon: () => <Icon source="chef-hat" size={30} /> }} />    
@@ -116,11 +128,9 @@ const App = () => {
     return (
         <MyUserContext.Provider value={[user, dispatch]}>
             <PaperProvider>
-                <AlertProvider>
-                    <NavigationContainer>
-                        <TabNavigator />
-                    </NavigationContainer>
-                </AlertProvider>
+                <NavigationContainer>
+                    <TabNavigator />
+                </NavigationContainer>
             </PaperProvider>
         </MyUserContext.Provider>
     );
