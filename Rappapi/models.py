@@ -151,24 +151,76 @@ class Rate(BaseModel):
 # ==========================================
 class TableStatus(models.TextChoices):
     AVAILABLE = 'AVAILABLE', 'Trống'
-    OCCUPIED = 'OCCUPIED', 'Đang ngồi'
-    BOOKED = 'BOOKED', 'Check-in'
+    BOOKED = 'BOOKED', 'Đã đặt'
+    OCCUPIED = 'OCCUPIED', 'Đang ăn'
+
 
 class Table(BaseModel):
     code = models.CharField(max_length=10, unique=True)
     location = models.CharField(max_length=100)
     capacity = models.IntegerField(default=4)
-    status = models.CharField(max_length=15, choices=TableStatus.choices, default=TableStatus.AVAILABLE)
+    status = models.CharField(
+        max_length=15,
+        choices=TableStatus.choices,
+        default=TableStatus.AVAILABLE
+    )
+
+    def __str__(self):
+        return f"{self.code} - {self.get_status_display()}"
 
     def get_state(self):
-        from Rappapi.design_patterns.State.table_state import AvailableTableState, CheckInTableState, OccupiedTableState
-        _state_map = {'AVAILABLE': AvailableTableState(), 'BOOKED': CheckInTableState(), 'OCCUPIED': OccupiedTableState(),}
-        return _state_map[self.status]
+        from Rappapi.design_patterns.State.table_state import (
+            AvailableTableState,
+            CheckInTableState,
+            OccupiedTableState
+        )
 
-    def _notify_firebase(self, new_status, total_price=0):
-        from Rappapi.firebase import update_firebase_table
-        update_firebase_table(table_id=self.code, status=new_status, total_price=total_price)
+        state_map = {
+            TableStatus.AVAILABLE: AvailableTableState(),
+            TableStatus.BOOKED: CheckInTableState(),
+            TableStatus.OCCUPIED: OccupiedTableState(),
+        }
 
+        return state_map[self.status]
+
+    def notify_firebase(self, total_price=0):
+        update_firebase_table(
+            table_id=self.code,
+            status=self.status,
+            total_price=total_price
+        )
+
+
+class TableBook(BaseModel):
+    table = models.ForeignKey(
+        Table,
+        on_delete=models.CASCADE,
+        related_name='bookings'
+    )
+
+    customer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='table_books',
+        limit_choices_to={'customer__isnull': False}
+    )
+
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+
+    status = models.CharField(
+        max_length=15,
+        choices=TableStatus.choices,
+        default=TableStatus.BOOKED
+    )
+
+    note = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-start_time']
+
+    def __str__(self):
+        return f"{self.customer.username} - {self.table.code} - {self.status}"
 # ==========================================
 # 5. NGHIỆP VỤ THANH TOÁN & HÓA ĐƠN
 # ==========================================
