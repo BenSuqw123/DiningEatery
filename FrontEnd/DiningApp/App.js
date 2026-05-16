@@ -30,14 +30,19 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const StackNavigator = () => {
-    const [cateId, setCateId] = useState();
+    const [cateId, setCateId]     = useState();
+    const [ordering, setOrdering] = useState("");
+    const [filters, setFilters]   = useState({ chef_name: "", price: "", time_served: "", ingre_name: "" });
+
     return (
         <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="index">
                 {() => (
                     <>
-                        <Header cateId={cateId} setCateId={setCateId} />
-                        <Home cateId={cateId} />
+                        <Header cateId={cateId} setCateId={setCateId}
+                            ordering={ordering} setOrdering={setOrdering}
+                            filters={filters} setFilters={setFilters} />
+                        <Home cateId={cateId} ordering={ordering} filters={filters} />
                     </>
                 )}
             </Stack.Screen>
@@ -45,7 +50,7 @@ const StackNavigator = () => {
             <Stack.Screen name="DishDetail" component={DishDetail} />
         </Stack.Navigator>
     );
-}
+};
 
 const ChatStack = () => (
     <Stack.Navigator screenOptions={{ headerShown: false }}>

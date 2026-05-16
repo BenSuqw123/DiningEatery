@@ -3,7 +3,6 @@ import { View, Text, Image, Alert, KeyboardAvoidingView, Platform, ScrollView } 
 import { Button, TextInput } from "react-native-paper";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
-import axios from "axios";
 import { MyUserContext } from "../../configs/MyContext";
 import { authApis, endpoints } from "../../configs/Apis";
 import Apis from "../../configs/Apis";
@@ -36,6 +35,12 @@ const CreateDish = () => {
     );
     const [saving, setSaving] = useState(false);
 
+    const imageFile = (asset) => ({
+        uri: asset.uri,
+        name: asset.fileName || asset.uri.split("/").pop() || "dish.jpg",
+        type: asset.mimeType || "image/jpeg",
+    });
+
     useEffect(() => {
         const load = async () => {
             const [catRes, chefRes] = await Promise.all([
@@ -61,32 +66,13 @@ const CreateDish = () => {
             setSaving(true);
             const token = await AsyncStorage.getItem("token");
 
-            // Upload ảnh nếu có ảnh mới
-            let imageUrl = null;
-            if (image) {
-                const imgData = new FormData();
-                imgData.append("file", { uri: image.uri, type: image.mimeType || "image/jpeg", name: "upload.jpg" });
-                imgData.append("upload_preset", process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-                imgData.append("cloud_name",    process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME);
-                const res = await axios.post(
-                    `https://api.cloudinary.com/v1_1/${process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
-                    imgData, { headers: { "Content-Type": "multipart/form-data" } }
-                );
-                imageUrl = res.data.secure_url;
-            }
-
-            // Tạo ingredient (hướng 2)
-            const ingredientIds = [];
-            for (let ing of ingredients.filter(i => i.name.trim())) {
-                const res = await authApis(token).post(endpoints["ingredients"], { name: ing.name });
-                ingredientIds.push({ ingredient_id: res.data.id, quantity: ing.quantity });
-            }
+            const ingredientData = ingredients.filter(i => i.name.trim()).map(i => ({ name: i.name, quantity: i.quantity }));
 
             const data = new FormData();
             Object.entries(form).forEach(([k, v]) => v && data.append(k, String(v)));
-            data.append("ingredients", JSON.stringify(ingredientIds));
+            data.append("ingredients", JSON.stringify(ingredientData));
             data.append("chef_ids",    JSON.stringify(selectedChefs));
-            if (imageUrl) data.append("image", imageUrl);
+            if (image) data.append("image", imageFile(image));
 
             if (isEdit) {
                 await authApis(token).patch(`${endpoints["dishes"]}${editingDish.id}/update/`, data, {
@@ -169,7 +155,7 @@ const CreateDish = () => {
                     <View key={idx} style={{ flexDirection: 'row', gap: 8 }}>
                         <TextInput mode="outlined" label="Tên" value={ing.name} style={{ flex: 1 }}
                             onChangeText={t => setIngredients(p => p.map((it, i) => i === idx ? { ...it, name: t } : it))} />
-                        <TextInput mode="outlined" label="Số Lượng" value={ing.quantity} style={{ width: 80 }}
+                        <TextInput mode="outlined" label="SL" value={ing.quantity} style={{ width: 80 }}
                             onChangeText={t => setIngredients(p => p.map((it, i) => i === idx ? { ...it, quantity: t } : it))} />
                         <Button compact onPress={() => setIngredients(p => p.filter((_, i) => i !== idx))}>✕</Button>
                     </View>

@@ -2,7 +2,6 @@ import { Image, Text, View, ScrollView, TouchableOpacity } from "react-native";
 import { Button, TextInput } from "react-native-paper";
 import { useContext, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
-import axios from "axios";
 import { MyUserContext } from "../../configs/MyContext";
 import { authApis, endpoints } from "../../configs/Apis";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -22,6 +21,12 @@ const UserProfile = () => {
 
     const role = ROLE_LABEL[user.role];
 
+    const imageFile = (asset) => ({
+        uri: asset.uri,
+        name: asset.fileName || asset.uri.split("/").pop() || "avatar.jpg",
+        type: asset.mimeType || "image/jpeg",
+    });
+
     const pickAvatar = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== "granted") return;
@@ -32,22 +37,16 @@ const UserProfile = () => {
     const save = async () => {
         try {
             setLoading(true);
-            let avatarUrl = null;
-            if (avatar) {
-                const data = new FormData();
-                data.append("file", { uri: avatar.uri, type: avatar.mimeType || "image/jpeg", name: "upload.jpg" });
-                data.append("upload_preset", process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-                data.append("cloud_name",    process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME);
-                const res = await axios.post(
-                    `https://api.cloudinary.com/v1_1/${process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
-                    data, { headers: { "Content-Type": "multipart/form-data" } }
-                );
-                avatarUrl = res.data.secure_url;
-            }
 
             const token = await AsyncStorage.getItem('token');
+            const data = new FormData();
+            Object.entries(form).forEach(([key, value]) => {
+                if (value !== undefined && value !== null) data.append(key, value);
+            });
+            if (avatar) data.append("avatar", imageFile(avatar));
+
             const res = await authApis(token).patch(endpoints['current_user'],
-                { ...form, ...(avatarUrl && { avatar: avatarUrl }) },
+                data,
                 { headers: { 'Content-Type': 'multipart/form-data' } }
             );
             dispatch({ type: "login", payload: res.data });

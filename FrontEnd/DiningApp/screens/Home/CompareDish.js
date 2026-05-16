@@ -27,7 +27,7 @@ const CompareDish = ({ navigation, route }) => {
 
     useEffect(() => {
         const ids = selectedDishes.map((d) => d.id).join(",");
-        Apis.get(`${endpoints.dishes}compare/?ids=${ids}`)
+        Apis.get(`${endpoints["dishes"]}compare/?ids=${ids}`)
             .then((res) => setResult(res.data))
             .catch(() => setError("So sánh thất bại, thử lại sau."))
             .finally(() => setLoading(false));
@@ -82,7 +82,7 @@ const CompareDish = ({ navigation, route }) => {
                                                         {crit.render(d)}
                                                     </Text>
                                                     {isWin && crit.best && (
-                                                        <Text style={{ fontSize: 10, color: "#888", marginTop: 2 }}>↑ tốt nhất</Text>
+                                                        <Text style={{ fontSize: 10, color: "red"}}>Tốt nhất</Text>
                                                     )}
                                                 </View>
                                             );

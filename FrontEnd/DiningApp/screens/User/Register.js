@@ -4,7 +4,6 @@ import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import Apis, { endpoints } from "../../configs/Apis";
 import { useNavigation } from "@react-navigation/native";
-import axios from "axios";
 
 const Register = () => {
     const fields = [
@@ -21,9 +20,18 @@ const Register = () => {
     const [loading, setLoading] = useState(false);
     const nav = useNavigation();
 
+    const imageFile = (asset) => ({
+        uri: asset.uri,
+        name: asset.fileName || asset.uri.split("/").pop() || "avatar.jpg",
+        type: asset.mimeType || "image/jpeg",
+    });
+
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") return;
+        if (status !== "granted") {
+            Alert.alert("Permissions denied!");
+            return;
+        }
 
         const result = await ImagePicker.launchImageLibraryAsync();
         if (!result.canceled) setUser({ ...user, avatar: result.assets[0] });
@@ -39,29 +47,12 @@ const Register = () => {
         try {
             setLoading(true);
 
-            let avatarUrl = null;
-            if (user.avatar) {
-                const data = new FormData();
-                data.append("file", {
-                    uri: user.avatar.uri,
-                    type: user.avatar.mimeType || "image/jpeg",
-                    name: "upload.jpg",
-                });
-                data.append("upload_preset", process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-                data.append("cloud_name", process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME);
-
-                const res = await axios.post(
-                    `https://api.cloudinary.com/v1_1/${process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
-                    data,
-                    { headers: { "Content-Type": "multipart/form-data" } }
-                );
-                avatarUrl = res.data.secure_url;
-            }
-
             const form = new FormData();
-            for (let key in user)
-                if (key !== "confirm" && key !== "avatar") form.append(key, user[key]);
-            if (avatarUrl) form.append("avatar", avatarUrl);
+            for (let key in user) {
+                if (key === "confirm") continue;
+                if (key === "avatar") form.append(key, imageFile(user.avatar));
+                else form.append(key, user[key]);
+            }
 
             const res = await Apis.post(endpoints["register"], form, {
                 headers: { "Content-Type": "multipart/form-data" },

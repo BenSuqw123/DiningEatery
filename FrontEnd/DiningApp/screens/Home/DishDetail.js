@@ -24,7 +24,7 @@ const DishDetail = ({ navigation, route }) => {
 
     useEffect(() => {
         Promise.all([
-            Apis.get(`${endpoints.dishes}?dish_id=${dishId}`),
+            Apis.get(`${endpoints["dishes"]}${dishId}/`),
             Apis.get(endpoints.rates(dishId)),
         ]).then(([dishRes, rateRes]) => {
             const data = dishRes.data.results ?? dishRes.data;
