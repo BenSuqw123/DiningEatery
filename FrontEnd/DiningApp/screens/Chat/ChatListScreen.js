@@ -17,11 +17,9 @@ const ChatListScreen = ({ navigation }) => {
                 const api   = authApis(token);
 
                 if (isChef) {
-                    // Chef: lấy danh sách phòng chat đã có
-                    const res = await api.get(endpoints.chat_my_rooms);
+                    const res = await api.get(endpoints.chat_room_chef);
                     setList(res.data);
                 } else {
-                    // Customer: lấy toàn bộ danh sách chef
                     const res = await api.get(endpoints.chefs);
                     setList(res.data.results ?? res.data);
                 }
@@ -56,7 +54,6 @@ const ChatListScreen = ({ navigation }) => {
                     </Text>
                 }
                 renderItem={({ item }) => {
-                    // Dữ liệu khác nhau tùy role
                     const name   = isChef
                         ? item.customer_name
                         : `${item.first_name} ${item.last_name}`;

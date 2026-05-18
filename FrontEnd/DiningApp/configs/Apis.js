@@ -2,25 +2,33 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 
 export const endpoints = {
-    dishes:    "/dishes/",
-    tables:    "/tables/",
-    invoices:  "/invoices/",
-    categories: "/categories/",
-    chefs:     "/chefs/",
-    ingredients: "/ingredients/",
-    checkin:   (id) => `/tables/${id}/checkin/`,
-    order:     (id) => `/tables/${id}/order/`,
-    checkout:  (id) => `/tables/${id}/checkout/`,
-    rates:     (id) => `/dishes/${id}/rates/`,
-    login:     "/o/token/",
-    register:  "/users/",
-    current_user: "/users/current-user/",
+  dishes: "/dishes/",
+  tables: "/tables/",
+  invoices: "/invoices/",
+  categories: "/categories/",
+  chefs: "/chefs/",
+  ingredients: "/ingredients/",
+  bookCheckin: (id) => `/tables/${id}/bookedTimes/`,
+  checkin: (id) => `/tables/${id}/checkin/`,
+  order: (id) => `/tables/${id}/order/`,
+  checkout: (id) => `/tables/${id}/checkout/`,
+  cancel: (id) => `/tables/${id}/cancelCheckin/`,
+  rates: (id) => `/dishes/${id}/rates/`,
+  login: "/o/token/",
+  register: "/users/",
+  current_user: "/users/current-user/",
+  compare_dishes: (ids) => `/dishes/compare/?ids=${ids}`,
 
-    //CHAT REALTIME
-    chat_room:    "/chats/room/",
-    chat_send:    "/chats/send/",
-    chat_history: "/chats/history/",
-    chat_my_rooms: "/chats/my-rooms/",
+
+  //CHAT REALTIME
+  chat_room: "/chats/room/",
+  chat_send: "/chats/send/",
+  chat_history: "/chats/history/",
+  chat_room_chef: "/chats/room-chef/",
+
+  //ADMIN
+  'pending-chefs': '/chefs/pending/',
+  'approve-chef': (id) => `/chefs/${id}/approve/`,
 }
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
