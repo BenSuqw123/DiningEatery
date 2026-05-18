@@ -44,7 +44,9 @@ class DishBuilder:
             dish.chefs.set(self._chefs)
 
         for item in self._ingredients:
-            ingredient = Ingredient.objects.get(pk=item['ingredient_id'])
-            IngredientDish.objects.create(dish=dish, ingredient=ingredient, quantity=item.get('quantity', ''),)
+            ingredient = Ingredient.objects.filter(name__iexact=item['name']).first()
+            if not ingredient:
+                ingredient = Ingredient.objects.create(name=item['name'])
+            IngredientDish.objects.create(dish=dish, ingredient=ingredient, quantity=item.get('quantity', ''))
 
         return dish

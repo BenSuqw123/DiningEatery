@@ -1,5 +1,8 @@
 import secrets
 from datetime import timedelta
+
+from django.db.models import Sum, F
+from django.http import HttpResponse
 from django.utils import timezone
 from django.db import transaction as db_transaction
 from oauth2_provider.models import Application, AccessToken, RefreshToken
@@ -8,53 +11,43 @@ from rest_framework import viewsets, generics, filters, status, parsers, permiss
 from rest_framework.decorators import action
 from rest_framework.response import Response
 import json
-from Rappapi.models import (
-    User, Dish, Ingredient, Rate, Category, Table, TableBook,
-    TableStatus, PaymentMethod, Invoice, InvoiceDetail, Chef, Customer, Admin
-)
+from Rappapi.models import User, Dish, Ingredient, Rate, Category, Table, TableBook, TableStatus, Invoice, InvoiceDetail, Chef, Customer, Admin, IngredientDish
 from Rappapi import serializers, paginators
-from .firebase import update_firebase_table, get_firebase_table, get_or_create_chat_room, send_chat_message, get_chat_messages, get_chef_rooms
+from .design_patterns.Decorator.dish_query_decor import SearchDecorator, CategoryDecorator, ChefNameDecorator, MaxPriceDecorator, MaxTimeDecorator, OrderByNameDecorator, OrderByPriceDecorator, OrderByRatingDecorator, IngredientDecorator
+from .firebase import update_firebase_table, get_or_create_chat_room, send_chat_message, get_chat_messages, get_chef_rooms
 from .serializers import InvoiceDetailSerializer, InvoiceSerializer
 from .design_patterns.Factory.payment_factory import PaymentFactory
 from .design_patterns.Builder.dish_builder import DishBuilder
 
-class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView):
+
+class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView, generics.RetrieveAPIView):
     queryset = Dish.objects.filter(active=True).prefetch_related('chefs', 'dish_ingredients__ingredient')
     serializer_class = serializers.DishSerializer
     pagination_class = paginators.DishPaginator
 
     def get_queryset(self):
         query = self.queryset
+        p = self.request.query_params
 
-        q = self.request.query_params.get('q')
-        if q:
-            query = query.filter(name__icontains=q)
+        # filter
+        query = SearchDecorator(query, p.get('q')).apply()
+        query = CategoryDecorator(query, p.get('category_id')).apply()
+        query = ChefNameDecorator(query, p.get('chef_name')).apply()
+        query = MaxPriceDecorator(query, p.get('price')).apply()
+        query = MaxTimeDecorator(query, p.get('time_served')).apply()
+        query = IngredientDecorator(query, p.get('ingre_name')).apply()
 
-        dish_id = self.request.query_params.get('dish_id')
-        if dish_id:
-            query = query.filter(id__icontains=dish_id)
-
-        chef_name = self.request.query_params.get('chef_name')
-        if chef_name:
-            q_first = query.filter(chefs__first_name__icontains=chef_name)
-            q_last = query.filter(chefs__last_name__icontains=chef_name)
-            query = (q_first | q_last).distinct()
-
-        ingredient_name = self.request.query_params.get('ingre_name')
-        if ingredient_name:
-            query = query.filter(ingredient__name__icontains=ingredient_name)
-
-        cate_id = self.request.query_params.get('category_id')
-        if cate_id:
-            query = query.filter(category_id=cate_id)
-
-        time_served = self.request.query_params.get('time_served')
-        if time_served:
-            query = query.filter(time_served__lte=time_served)
-
-        price = self.request.query_params.get('price')
-        if price:
-            query = query.filter(price__lte=price)
+        ordering = p.get('ordering')
+        ordering_map = {
+            'name': OrderByNameDecorator(query),
+            '-name': OrderByNameDecorator(query, desc=True),
+            'price': OrderByPriceDecorator(query),
+            '-price': OrderByPriceDecorator(query, desc=True),
+            'rating': OrderByRatingDecorator(query),
+            '-rating': OrderByRatingDecorator(query, desc=True),
+        }
+        if ordering in ordering_map:
+            query = ordering_map[ordering].apply()
 
         return query
 
@@ -64,14 +57,13 @@ class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView):
             return Response({"error": "Chỉ đầu bếp đã được duyệt mới được tạo món ăn."}, status=status.HTTP_403_FORBIDDEN)
         try:
             ingredients = json.loads(request.data.get('ingredients', '[]'))
-
             chef_ids = json.loads(request.data.get('chef_ids', '[]'))
             chefs = User.objects.filter(pk__in=chef_ids, chef__is_accepted=True)
             chef_list = list(chefs)
             if request.user not in chef_list:
                 chef_list.append(request.user)
 
-            dish = (DishBuilder(name=request.data.get('name'),description=request.data.get('description'),price=request.data.get('price'),image=request.FILES.get('image'), time_served=request.data.get('time_served'), category_id=request.data.get('category_id'),)
+            dish = (DishBuilder( name=request.data.get('name'), description=request.data.get('description'), price=request.data.get('price'), image=request.FILES.get('image'), time_served=request.data.get('time_served'), category_id=request.data.get('category_id'))
                 .set_chefs(chef_list)
                 .set_ingredients(ingredients)
                 .build())
@@ -82,20 +74,55 @@ class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView):
 
         return Response(serializers.DishSerializer(dish).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['patch'], url_path='update', permission_classes=[permissions.IsAuthenticated])
+    def update_dish(self, request, pk=None):
+        if not hasattr(request.user, 'chef') or not request.user.chef.is_accepted:
+            return Response({"error": "Không có quyền."}, status=status.HTTP_403_FORBIDDEN)
+
+        dish = Dish.objects.filter(pk=pk, active=True).first()
+        if not dish:
+            return Response({"error": "Không tìm thấy món."}, status=status.HTTP_404_NOT_FOUND)
+
+        for field in ['name', 'description', 'price', 'time_served', 'category_id']:
+            if field in request.data:
+                setattr(dish, field, request.data[field])
+
+        if request.FILES.get('image'):
+            dish.image = request.FILES.get('image')
+
+        if 'ingredients' in request.data:
+            ingredients = json.loads(request.data.get('ingredients', '[]'))
+            dish.dish_ingredients.all().delete()
+            for item in ingredients:
+                ingredient = Ingredient.objects.filter(name__iexact=item['name']).first()
+                if not ingredient:
+                    ingredient = Ingredient.objects.create(name=item['name'])
+                IngredientDish.objects.create(dish=dish, ingredient=ingredient, quantity=item.get('quantity', ''))
+
+        if 'chef_ids' in request.data:
+            chef_ids = json.loads(request.data.get('chef_ids', '[]'))
+            chefs = list(User.objects.filter(pk__in=chef_ids, chef__is_accepted=True))
+            if request.user not in chefs:
+                chefs.append(request.user)
+            dish.chefs.set(chefs)
+
+        dish.save()
+        return Response(serializers.DishSerializer(dish).data, status=status.HTTP_200_OK)
+
+    def get_permissions(self):
+        if self.action in ['rating', 'create'] and self.request.method == 'POST':
+            return [permissions.IsAuthenticated()]
+        return [permissions.AllowAny()]
+
     @action(methods=['get'], url_path='chef', detail=True)
     def get_chef(self, request, pk=None):
-        chef = self.get_object().chefs.filter(is_active=True)
-        return Response(serializers.ChefSerializer(chef, many=True).data, status=status.HTTP_200_OK)
+        chefs = self.get_object().chefs.filter(is_active=True)
+        return Response(serializers.ChefSerializer(chefs, many=True).data, status=status.HTTP_200_OK)
 
     @action(methods=['get'], url_path='ingredient', detail=True)
     def get_ingredient(self, request, pk=None):
-        ingredient = self.get_object().ingredients.filter(is_active=True)
-        return Response(serializers.IngredientSerializer(ingredient, many=True).data, status=status.HTTP_200_OK)
-
-    def get_permissions(self):
-        if self.action in ['rating','create'] and self.request.method == 'POST':
-            return [permissions.IsAuthenticated()]
-        return [permissions.AllowAny()]
+        ingredients = self.get_object().ingredients.filter(is_active=True)
+        return Response(serializers.IngredientSerializer(ingredients, many=True).data, status=status.HTTP_200_OK)
 
     @action(methods=['post', 'get'], url_path='rates', detail=True)
     def rating(self, request, pk):
@@ -107,9 +134,8 @@ class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView):
                 'comment': request.data.get('comment'),
                 'rating': request.data.get('rating'),
                 'customer': request.user.pk,
-                'dish': pk
+                'dish': pk,
             })
-
             s.is_valid(raise_exception=True)
             r = s.save()
             return Response(serializers.RateSerializer(r).data, status=status.HTTP_201_CREATED)
@@ -118,27 +144,33 @@ class DishViewSet(viewsets.ViewSet, generics.ListCreateAPIView):
         p = paginators.RatePaginator()
         page = p.paginate_queryset(rates, request)
         if page is not None:
-            serializer = serializers.RateSerializer(page, many=True)
-            return p.get_paginated_response(serializer.data)
-
+            return p.get_paginated_response(serializers.RateSerializer(page, many=True).data)
         return Response(serializers.RateSerializer(rates, many=True).data, status=status.HTTP_200_OK)
+
+    @action(methods=['get'], url_path='compare', detail=False)
+    def compare(self, request):
+        ids = request.query_params.get('ids', '')
+        id_list = [i for i in ids.split(',') if i.strip().isdigit()]
+
+        if len(id_list) < 2:
+            return Response({"error": "Cần ít nhất 2 món để so sánh"}, status=status.HTTP_400_BAD_REQUEST)
+
+        dishes = Dish.objects.filter(id__in=id_list, active=True).prefetch_related('dish_ingredients__ingredient', 'ratings')
+        return Response(serializers.DishCompareSerializer(dishes, many=True).data, status=status.HTTP_200_OK)
 
 
 class UserViewSet(viewsets.ViewSet, generics.CreateAPIView):
     queryset = User.objects.filter(is_active=True)
     serializer_class = serializers.UserSerializer
     parser_classes = [parsers.MultiPartParser]
-    pagination_class = paginators.ItemPaginator
 
-    @action(methods=['get', 'patch'], url_path='current-user', detail=False,
-            permission_classes=[permissions.IsAuthenticated])
+    @action(methods=['get', 'patch'], url_path='current-user', detail=False, permission_classes=[permissions.IsAuthenticated])
     def current_user(self, request):
         u = request.user
         if request.method == 'PATCH':
             s = serializers.SimpleUserSerializer(u, data=request.data, partial=True)
             s.is_valid(raise_exception=True)
             u = s.save()
-
         return Response(serializers.UserSerializer(u).data, status=status.HTTP_200_OK)
 
 
@@ -150,11 +182,34 @@ class ChefViewSet(viewsets.ViewSet, generics.ListAPIView):
         query = self.queryset.all()
         q = self.request.query_params.get('q')
         if q:
-            q_first = query.filter(first_name__icontains=q)
-            q_last = query.filter(last_name__icontains=q)
-            query = (q_first | q_last).distinct()
-
+            query = (
+                    query.filter(first_name__icontains=q) | query.filter(last_name__icontains=q)
+            ).distinct()
         return query
+
+    @action(detail=False, methods=['get'], url_path='pending',
+            permission_classes=[permissions.IsAuthenticated])
+    def pending(self, request):
+        if not hasattr(request.user, 'admin'):
+            return Response({"error": "Chỉ admin mới được xem."}, status=status.HTTP_403_FORBIDDEN)
+        chefs = User.objects.filter(chef__isnull=False, chef__is_accepted=False, is_active=True)
+        return Response(serializers.ChefSerializer(chefs, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['patch'], url_path='approve',
+            permission_classes=[permissions.IsAuthenticated])
+    def approve(self, request, pk=None):
+        if not hasattr(request.user, 'admin'):
+            return Response({"error": "Chỉ admin mới được duyệt chef."}, status=status.HTTP_403_FORBIDDEN)
+
+        chef_user = User.objects.filter(pk=pk, chef__isnull=False).first()
+        if not chef_user:
+            return Response({"error": "Không tìm thấy chef."}, status=status.HTTP_404_NOT_FOUND)
+
+        chef = chef_user.chef
+        chef.is_accepted = True
+        chef.accepted_by = request.user.admin
+        chef.save()
+        return Response(serializers.ChefSerializer(chef_user).data, status=status.HTTP_200_OK)
 
 
 class IngredientViewSet(viewsets.ViewSet, generics.ListAPIView):
@@ -174,105 +229,6 @@ class CategoryViewSet(viewsets.ViewSet, generics.ListAPIView):
     serializer_class = serializers.CategorySerializer
 
 
-class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
-    queryset = Table.objects.filter(active=True)
-    serializer_class = serializers.TableSerializer
-
-    @action(detail=True, methods=['post'], url_path='checkin', permission_classes=[permissions.IsAuthenticated])
-    def check_in(self, request, pk=None):
-        if not hasattr(request.user, 'customer'):
-            return Response({"error": "Chỉ khách hàng mới được check-in."}, status=status.HTTP_403_FORBIDDEN)
-
-        table = Table.objects.filter(pk=pk, active=True).first()
-        if not table:
-            return Response({"error": "Không tìm thấy bàn"}, status=status.HTTP_404_NOT_FOUND)
-
-        if table.status != TableStatus.AVAILABLE:
-            return Response({"error": "Bàn này không trống."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            table.get_state().customer_checkin(table)
-            Invoice.objects.create(customer=request.user,table=table,total_amount=0,is_paid=False,transaction_id=None)
-            update_firebase_table(table_id=table.code, status=TableStatus.BOOKED, total_price=0)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        return Response({"message": f"Check-in bàn {table.code} thành công!"}, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=['post'], url_path='order', permission_classes=[permissions.IsAuthenticated])
-    def order_dish(self, request, pk=None):
-        dish_id = request.data.get('dish_id')
-        table = Table.objects.filter(pk=pk, active=True).first()
-        if not table:
-            return Response({"error": "Không tìm thấy bàn"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            quantity = int(request.data.get('quantity', 1))
-            if quantity < 1:
-                raise ValueError
-        except (ValueError, TypeError):
-            return Response({"error": "Số lượng không hợp lệ"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if table.status not in [TableStatus.BOOKED, TableStatus.OCCUPIED]:
-            return Response({"error": "Bàn chưa có khách check-in."}, status=status.HTTP_400_BAD_REQUEST)
-
-        dish = Dish.objects.filter(pk=dish_id).first()
-        if not dish:
-            return Response({"error": "Không tìm thấy món"}, status=status.HTTP_404_NOT_FOUND)
-
-        invoice = Invoice.objects.filter(table=table, is_paid=False).first()
-        if not invoice:
-            return Response({"error": "Không tìm thấy hóa đơn hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            detail, created = InvoiceDetail.objects.get_or_create(invoice=invoice,dish=dish,defaults={'quantity': 0})
-            detail.quantity += quantity
-            detail.save()
-            new_cost = dish.price * quantity
-            invoice.total_amount += new_cost
-            invoice.save()
-            table.get_state().customer_order(table, float(invoice.total_amount))
-
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        return Response({
-            "message": f"Đã cập nhật {dish.name} (Tổng số lượng: {detail.quantity})",
-            "added_cost": new_cost,
-            "total_amount_now": invoice.total_amount
-        }, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=['post'], url_path='checkout', permission_classes=[permissions.IsAuthenticated])
-    def checkout(self, request, pk=None):
-        table = Table.objects.filter(pk=pk, active=True).first()
-        if not table:
-            return Response({"error": "Không tìm thấy bàn"}, status=status.HTTP_404_NOT_FOUND)
-
-        method = request.data.get('method')
-        if not method:
-            return Response({"error":"Vui lòng chọn phương thức thanh toán"}, status=status.HTTP_400_BAD_REQUEST)
-
-        transaction_id = request.data.get('transaction')
-        invoice = Invoice.objects.filter(table=table, is_paid=False).first()
-        if not invoice:
-            return Response({"error": "Không có hóa đơn"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            payment = PaymentFactory.get_strategy(method=method)
-            if method != "CASH":
-                if not transaction_id:
-                    return Response({"error": "Vui lòng cung cấp mã giao dịch"}, status=status.HTTP_400_BAD_REQUEST)
-                if Invoice.objects.filter(transaction_id=str(transaction_id)).exists():
-                    return Response({"error": "Mã giao dịch đã tồn tại"}, status=status.HTTP_400_BAD_REQUEST)
-                invoice  = payment.pay(invoice,table,transaction_id)
-                table.get_state().customer_checkout(table)
-            else:
-                invoice = payment.pay(invoice,table)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(serializers.InvoiceSerializer(invoice).data,status=status.HTTP_200_OK)
-
-
 class InvoiceViewSet(viewsets.ViewSet, generics.ListAPIView):
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -280,12 +236,11 @@ class InvoiceViewSet(viewsets.ViewSet, generics.ListAPIView):
 
     def get_queryset(self):
         query = Invoice.objects.filter(customer=self.request.user).prefetch_related('details__dish')
-
         q = self.request.query_params.get('q')
         if q:
             query = query.filter(id=q)
-
         return query
+
 
 class ChatViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -301,7 +256,6 @@ class ChatViewSet(viewsets.ViewSet):
                 return Response({"error": "Thiếu chef_id"}, status=status.HTTP_400_BAD_REQUEST)
             if not User.objects.filter(id=chef_id, chef__is_accepted=True).exists():
                 return Response({"error": "Đầu bếp không tồn tại"}, status=status.HTTP_404_NOT_FOUND)
-
         elif hasattr(user, 'chef'):
             chef_id = user.id
             customer_id = request.data.get('customer_id')
@@ -311,7 +265,7 @@ class ChatViewSet(viewsets.ViewSet):
             return Response({"error": "Không có quyền"}, status=status.HTTP_403_FORBIDDEN)
 
         room_id = get_or_create_chat_room(customer_id, chef_id)
-        return Response({"room_id": room_id,"firebase_path": f"chats/{room_id}/messages"}, status=status.HTTP_200_OK)
+        return Response({"room_id": room_id, "firebase_path": f"chats/{room_id}/messages"}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='send')
     def send_message(self, request):
@@ -340,31 +294,21 @@ class ChatViewSet(viewsets.ViewSet):
         room_id = request.query_params.get('room_id')
         if not room_id:
             return Response({"error": "Thiếu room_id"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(get_chat_messages(room_id), status=status.HTTP_200_OK)
 
-        messages = get_chat_messages(room_id)
-        return Response(messages, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=['get'], url_path='my-rooms')
+    @action(detail=False, methods=['get'], url_path='room-chef')
     def my_rooms(self, request):
-        user = request.user
-        if not hasattr(user, 'chef'):
+        if not hasattr(request.user, 'chef'):
             return Response({"error": "Chỉ dành cho đầu bếp"}, status=status.HTTP_403_FORBIDDEN)
+        return Response(get_chef_rooms(request.user.id), status=status.HTTP_200_OK)
 
-        rooms = get_chef_rooms(user.id)
-        for room in rooms:
-            try:
-                c = User.objects.get(id=room['customer_id'])
-                room['customer_name'] = f"{c.first_name} {c.last_name}"
-                room['customer_avatar'] = c.avatar.url if c.avatar else None
-            except User.DoesNotExist:
-                room['customer_name'] = "Khách hàng"
-                room['customer_avatar'] = None
-        return Response(rooms, status=status.HTTP_200_OK)
+
 class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
     queryset = Table.objects.filter(active=True)
     serializer_class = serializers.TableSerializer
 
-    # ── Helper ──────────────────────────────────────────────
+    # ── Helper ───────────────────────────────────────────────────────────────
+
     def get_active_table_book(self, table, user):
         if not hasattr(user, 'customer'):
             return None
@@ -374,8 +318,9 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
             status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED]
         ).order_by('-id').first()
 
-    # ── booked-times ────────────────────────────────────────
-    @action(detail=True, methods=['get'], url_path='booked-times')
+    # ── Danh sách khung giờ đã đặt của một bàn ───────────────────────────────
+
+    @action(detail=True, methods=['get'], url_path='bookedTimes')
     def booked_times(self, request, pk=None):
         table = Table.objects.filter(pk=pk, active=True).first()
         if not table:
@@ -386,20 +331,10 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
             status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED]
         ).order_by('start_time')
 
-        data = [
-            {
-                "id": b.id,
-                "start_time": b.start_time,
-                "end_time": b.end_time,
-                "status": b.status,
-                "customer_id": b.customer_id,
-                "note": b.note or ""
-            }
-            for b in books
-        ]
-        return Response(data, status=status.HTTP_200_OK)
+        return Response(serializers.TableBookSerializer(books, many=True).data, status=status.HTTP_200_OK)
 
-    # ── check-in ─────────────────────────────────────────────
+    # ── Đặt bàn ──────────────────────────────────────────────────────────────
+
     @action(detail=True, methods=['post'], url_path='checkin',
             permission_classes=[permissions.IsAuthenticated])
     def check_in(self, request, pk=None):
@@ -411,8 +346,6 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
             return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
 
         start_time = request.data.get('start_time')
-        note = request.data.get('note', '')
-
         if not start_time:
             return Response({"error": "Vui lòng chọn thời gian đặt bàn."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -429,32 +362,36 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
 
         end_time = start_time + timedelta(hours=2)
 
-        active_booking = TableBook.objects.filter(
-            customer=request.user,
-            status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED]
-        ).first()
-        if active_booking:
+        # Kiểm tra user đang có bàn chưa hoàn thành (chỉ tính booking chưa hết giờ)
+        if TableBook.objects.filter(
+                customer=request.user,
+                status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED],
+                end_time__gt=timezone.now(),
+        ).exists():
             return Response({"error": "Bạn đang có bàn chưa hoàn thành."}, status=status.HTTP_400_BAD_REQUEST)
 
-        overlap = TableBook.objects.filter(
-            table=table,
-            status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED],
-            start_time__lt=end_time,
-            end_time__gt=start_time
-        ).exists()
-        if overlap:
+        # Kiểm tra trùng khung giờ
+        if TableBook.objects.filter(
+                table=table,
+                status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED],
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+        ).exists():
             return Response({"error": "Khung giờ này đã có người đặt."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             with db_transaction.atomic():
                 TableBook.objects.create(
-                    table=table, customer=request.user,
-                    start_time=start_time, end_time=end_time,
-                    status=TableStatus.BOOKED, note=note
+                    table=table,
+                    customer=request.user,
+                    start_time=start_time,
+                    end_time=end_time,
+                    status=TableStatus.BOOKED,
+                    note=request.data.get('note', ''),
                 )
                 Invoice.objects.create(
                     customer=request.user, table=table,
-                    total_amount=0, is_paid=False, transaction_id=None
+                    total_amount=0, is_paid=False, transaction_id=None,
                 )
                 table.status = TableStatus.BOOKED
                 table.save()
@@ -464,8 +401,9 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
 
         return Response(serializers.TableSerializer(table).data, status=status.HTTP_200_OK)
 
-    # ── cancel-checkin ───────────────────────────────────────
-    @action(detail=True, methods=['patch'], url_path='cancel-checkin',
+    # ── Hủy đặt bàn — chỉ đúng customer đã đặt mới hủy được ─────────────────
+
+    @action(detail=True, methods=['patch'], url_path='cancelCheckin',
             permission_classes=[permissions.IsAuthenticated])
     def cancel_check_in(self, request, pk=None):
         if not hasattr(request.user, 'customer'):
@@ -475,11 +413,15 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
         if not table:
             return Response({"error": "Không tìm thấy bàn."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Chỉ tìm booking của chính request.user — user khác sẽ không tìm thấy
         table_book = TableBook.objects.filter(
-            table=table, customer=request.user, status=TableStatus.BOOKED
+            table=table,
+            customer=request.user,
+            status=TableStatus.BOOKED,
         ).order_by('-id').first()
+
         if not table_book:
-            return Response({"error": "Không tìm thấy lượt đặt bàn để hủy."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Bạn không có lượt đặt bàn nào để hủy."}, status=status.HTTP_403_FORBIDDEN)
 
         invoice = Invoice.objects.filter(table=table, customer=request.user, is_paid=False).first()
         if invoice and invoice.details.exists():
@@ -490,19 +432,31 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
                 if invoice:
                     invoice.delete()
                 table_book.delete()
-                table.status = TableStatus.AVAILABLE
-                table.save()
-                update_firebase_table(table_id=table.code, status=TableStatus.AVAILABLE.value, total_price=0)
+
+                # Kiểm tra còn booking active nào khác của bàn này không
+                remaining = TableBook.objects.filter(
+                    table=table,
+                    status__in=[TableStatus.BOOKED, TableStatus.OCCUPIED],
+                ).exists()
+
+                if not remaining:
+                    # Không còn ai đặt → mới set về AVAILABLE
+                    table.status = TableStatus.AVAILABLE
+                    table.save()
+                    update_firebase_table(table_id=table.code, status=TableStatus.AVAILABLE.value, total_price=0)
+                # Nếu còn booking khác → giữ nguyên status hiện tại của bàn
+
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializers.TableSerializer(table).data, status=status.HTTP_200_OK)
 
-    # ── order ────────────────────────────────────────────────
+
+    # ── Gọi món ───────────────────────────────────────────────────────────────
+
     @action(detail=True, methods=['post'], url_path='order',
             permission_classes=[permissions.IsAuthenticated])
     def order_dish(self, request, pk=None):
-        # ✅ Bảo mật: chỉ customer
         if not hasattr(request.user, 'customer'):
             return Response({"error": "Chỉ khách hàng mới được gọi món."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -529,7 +483,6 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
             return Response({"error": "Không tìm thấy lượt đặt bàn hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
 
         now = timezone.now()
-        # ✅ Bảo mật: chỉ gọi được trong khung giờ
         if not (table_book.start_time <= now <= table_book.end_time):
             return Response({"error": "Chỉ được gọi món trong thời gian sử dụng bàn."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -556,18 +509,18 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
                 update_firebase_table(
                     table_id=table.code,
                     status=TableStatus.OCCUPIED.value,
-                    total_price=float(invoice.total_amount)
+                    total_price=float(invoice.total_amount),
                 )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializers.InvoiceSerializer(invoice).data, status=status.HTTP_200_OK)
 
-    # ── checkout ─────────────────────────────────────────────
+    # ── Thanh toán ────────────────────────────────────────────────────────────
+
     @action(detail=True, methods=['post'], url_path='checkout',
             permission_classes=[permissions.IsAuthenticated])
     def checkout(self, request, pk=None):
-        # ✅ Bảo mật: chỉ customer
         if not hasattr(request.user, 'customer'):
             return Response({"error": "Chỉ khách hàng mới được thanh toán."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -609,3 +562,19 @@ class TableViewSet(viewsets.ViewSet, generics.ListAPIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(serializers.InvoiceSerializer(invoice).data, status=status.HTTP_200_OK)
+
+class StatisViewSet(viewsets.ViewSet,generics.ListAPIView):
+    permissions = [permissions.IsAuthenticated]
+    queryset = Invoice.objects.all()
+    serializer_class = InvoiceSerializer
+
+    @action(methods=['get'], detail=False, url_path='chef-statis')
+    def chef_statis(self, request):
+
+        DT_MON = InvoiceDetail.objects.filter('dish__name').annotate(total_quantity=Sum('quantity'),total_revenue=Sum(F('quantity')*F('dish__price')))
+        DT_TG = Invoice.objects.filter(is_paid=True).values('created_at__date', 'created_at__month','create_at__year').annotate(total_revenue=Sum('total_amount')).order_by('create_at__date','create_at__year','create_at__year')
+        return Response(DT_MON,status=status.HTTP_200_OK)
+
+    @action(methods=['get'], detail=False, url_path='admin-statis')
+    def admin_statis(self,request):
+        pass

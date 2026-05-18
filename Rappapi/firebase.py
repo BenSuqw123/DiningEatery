@@ -1,6 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials, db, auth
 
+
 if not firebase_admin._apps:
     cred = credentials.Certificate("diningapp-9b1aa-firebase-adminsdk-fbsvc-ec017bebec.json")
     firebase_admin.initialize_app(cred, {
@@ -52,18 +53,31 @@ def get_chat_messages(room_id, limit=50):
         return []
     return [{'id': k, **v} for k, v in data.items()]
 
+
 def get_chef_rooms(chef_id):
+    from Rappapi.models import User
     ref = db.reference('chats')
     all_rooms = ref.get()
     if not all_rooms:
         return []
+
     result = []
     for room_id, room_data in all_rooms.items():
         if f'chef_{chef_id}' in room_id:
             info = room_data.get('info', {})
+            try:
+                c = User.objects.get(id=info.get('customer_id'))
+                customer_name = f"{c.first_name} {c.last_name}"
+                customer_avatar = c.avatar.url if c.avatar else None
+            except User.DoesNotExist:
+                customer_name = "Khách hàng"
+                customer_avatar = None
+
             result.append({
-                'room_id':      room_id,
-                'customer_id':  info.get('customer_id'),
+                'room_id': room_id,
+                'customer_id': info.get('customer_id'),
                 'last_message': info.get('last_message', ''),
+                'customer_name': customer_name,  # gộp vào đây
+                'customer_avatar': customer_avatar,  # gộp vào đây
             })
     return result

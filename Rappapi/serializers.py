@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from Rappapi.models import (
     IngredientDish, User, Dish, Ingredient, Invoice,
-    InvoiceDetail, Rate, Category, Table,
+    InvoiceDetail, Rate, Category, Table, TableBook,
     Chef, Customer, Admin
 )
 
@@ -9,7 +9,7 @@ from Rappapi.models import (
 class SimpleUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["first_name", "last_name", 'avatar']
+        fields = ["first_name", "last_name", 'avatar', 'email']
 
 
 class UserSerializer(SimpleUserSerializer):
@@ -17,7 +17,7 @@ class UserSerializer(SimpleUserSerializer):
 
     class Meta:
         model = User
-        fields = SimpleUserSerializer.Meta.fields + ['id', 'username', 'password', 'role', 'email']
+        fields = SimpleUserSerializer.Meta.fields + ['id', 'username', 'password', 'role']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -77,10 +77,17 @@ class IngredientDishSerializer(IngredientSerializer):
 class DishSerializer(ItemSerializer):
     ingredients = IngredientDishSerializer(source='dish_ingredients',many=True,read_only=True)
     chefs = ChefSerializer(many=True, read_only=True)
+    avg_rating = serializers.SerializerMethodField()
+
+    def get_avg_rating(self, obj):
+        from django.db.models import Avg
+        result = obj.ratings.filter(active=True).aggregate(avg=Avg('rating'))
+        avg = result['avg']
+        return round(avg, 1) if avg else None
 
     class Meta:
         model = Dish
-        fields = ['id', 'created_at', 'name', 'description', 'price', 'ingredients', 'chefs', 'time_served', 'image']
+        fields = ['id', 'created_at', 'name', 'description', 'price', 'ingredients', 'chefs', 'time_served', 'image', 'avg_rating' , 'category']
 
 class TableSerializer(serializers.ModelSerializer):
     class Meta:
@@ -130,3 +137,25 @@ class InvoiceSerializer(serializers.ModelSerializer):
             data["transaction_id"] = instance.transaction_id
 
         return data
+class TableBookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TableBook
+        fields = ['id', 'start_time', 'end_time', 'status', 'customer_id', 'note']
+
+class DishCompareSerializer(ItemSerializer):
+    ingredients = IngredientDishSerializer(source='dish_ingredients', many=True, read_only=True)
+    avg_rating = serializers.SerializerMethodField()
+    rating_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Dish
+        fields = ['id', 'name', 'price', 'time_served', 'image', 'ingredients', 'avg_rating', 'rating_count']
+
+    def get_avg_rating(self, obj):
+        from django.db.models import Avg
+        result = obj.ratings.filter(active=True).aggregate(avg=Avg('rating'))
+        avg = result['avg']
+        return round(avg, 1) if avg else None
+
+    def get_rating_count(self, obj):
+        return obj.ratings.filter(active=True).count()

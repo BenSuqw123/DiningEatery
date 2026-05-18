@@ -7,11 +7,11 @@ from django.db.models import Count, Sum
 from ckeditor_uploader.widgets import CKEditorUploadingWidget
 from django.contrib.auth.admin import UserAdmin
 
-from Rappapi.models import (
-    User, Customer, Chef, Admin as AdminProfile,
+from Rappapi.models import ( User, Customer, Chef, Admin as AdminProfile,
     Ingredient, Dish, Rate, IngredientDish, Invoice,
-    InvoiceDetail, Category, Table
+    InvoiceDetail, Category, Table, TableBook
 )
+
 
 # --- 1. FORMS & INLINES ---
 
@@ -137,3 +137,4 @@ admin_site.register(Ingredient)
 admin_site.register(Table, admin.ModelAdmin)
 admin_site.register(Invoice, InvoiceAdmin)
 admin_site.register(Rate, admin.ModelAdmin)
+admin_site.register(TableBook)

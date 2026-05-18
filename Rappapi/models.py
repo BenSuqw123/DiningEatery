@@ -3,6 +3,13 @@ from django.contrib.auth.models import AbstractUser
 from cloudinary.models import CloudinaryField
 from Rappapi.firebase import update_firebase_table
 
+
+class TableStatus(models.TextChoices):
+    AVAILABLE = 'AVAILABLE', 'Trống'
+    BOOKED = 'BOOKED', 'Đã đặt'
+    OCCUPIED = 'OCCUPIED', 'Đang ăn'
+
+from Rappapi.design_patterns.State.table_state import AvailableTableState, CheckInTableState, OccupiedTableState
 # ==========================================
 # 0. BASE MODEL
 # ==========================================
@@ -149,10 +156,6 @@ class Rate(BaseModel):
 # ==========================================
 # 4. QUẢN LÝ BÀN
 # ==========================================
-class TableStatus(models.TextChoices):
-    AVAILABLE = 'AVAILABLE', 'Trống'
-    BOOKED = 'BOOKED', 'Đã đặt'
-    OCCUPIED = 'OCCUPIED', 'Đang ăn'
 
 
 class Table(BaseModel):
@@ -169,11 +172,7 @@ class Table(BaseModel):
         return f"{self.code} - {self.get_status_display()}"
 
     def get_state(self):
-        from Rappapi.design_patterns.State.table_state import (
-            AvailableTableState,
-            CheckInTableState,
-            OccupiedTableState
-        )
+
 
         state_map = {
             TableStatus.AVAILABLE: AvailableTableState(),
